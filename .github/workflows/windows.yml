@@ -6,7 +6,7 @@ on:
   pull_request:
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   windows:
     runs-on: windows-latest
@@ -22,8 +22,13 @@ jobs:
         shell: pwsh
         run: |
           foreach ($name in @('Core', 'Protocol', 'Security')) {
-            dotnet run --project "tests/RemoteDesk.$name.Tests" -c Release --no-build
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $output = dotnet run --project "tests/RemoteDesk.$name.Tests" -c Release --no-build 2>&1
+            $code = $LASTEXITCODE
+            $output | ForEach-Object { Write-Host "$_" }
+            if ($code -ne 0) {
+              $output | ForEach-Object { Write-Host "::error::$_" }
+              exit $code
+            }
           }
       - name: Publish Windows x64 executable
         run: dotnet publish src/RemoteDesk.Desktop -c Release -r win-x64 --self-contained false -o artifacts/run
@@ -50,3 +55,24 @@ jobs:
           name: RemoteDesk-win-x64
           path: artifacts/run/
           retention-days: 14
+      - name: Save verified deliverables to the session branch
+        shell: pwsh
+        run: |
+          Copy-Item artifacts/run/* run/ -Force
+          @"
+          # Verified Windows build
+
+          Source commit: ${{ github.sha }}
+          Workflow: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Runner: windows-latest, Windows x64, .NET 10 SDK.
+          Checks: Release solution build, Core/Protocol/Security integration suites, Windows CNG persistence and non-exportability, WPF window startup.
+          Manual two-PC LAN, DPI and resource acceptance: pending (see docs/Acceptance.md).
+          Package is unsigned. No screen streaming or remote input in phase one.
+          "@ | Set-Content run/BUILD-INFO.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add run
+          git commit -m "Add verified Windows executables and portable package"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git push origin HEAD:arena/3ab7c5f0-remoteai
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

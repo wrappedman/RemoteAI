@@ -145,7 +145,7 @@ public sealed class SecureSession : IAsyncDisposable
             }
         }
         catch (OperationCanceledException) { Close(_stop.IsCancellationRequested ? CloseReason : "Heartbeat timeout"); }
-        catch (Exception ex) when (ex is IOException or SocketException or AuthenticationException or ObjectDisposedException)
+        catch (Exception ex) when (ex is InvalidDataException or IOException or SocketException or AuthenticationException or ObjectDisposedException)
         { Close(ex is InvalidDataException ? "Invalid protocol message" : "Connection lost"); }
     }
 
@@ -157,7 +157,7 @@ public sealed class SecureSession : IAsyncDisposable
             while (await timer.WaitForNextTickAsync(_stop.Token)) await SendAsync(MessageType.Ping, _stop.Token);
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException) { Close("Connection lost"); }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or SocketException or ObjectDisposedException) { Close("Connection lost"); }
     }
     private async Task SendAsync(MessageType type, CancellationToken token)
     {
@@ -175,7 +175,7 @@ public sealed class SecureSession : IAsyncDisposable
     {
         if (Volatile.Read(ref _closed) != 0) return;
         try { await SendAsync(MessageType.Disconnect, CancellationToken.None); }
-        catch (Exception ex) when (ex is IOException or SocketException or OperationCanceledException or ObjectDisposedException) { }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or SocketException or OperationCanceledException or ObjectDisposedException) { }
         finally { Close("Disconnected locally"); }
     }
     private void Close(string reason)

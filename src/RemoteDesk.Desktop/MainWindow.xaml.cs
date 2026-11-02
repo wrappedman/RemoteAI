@@ -80,6 +80,7 @@ public partial class MainWindow : Window
         {
             ConnectButton.IsEnabled = false;
             _identity = await Task.Run(DeviceIdentity.LoadOrCreateWindows);
+            if (_closing) { _identity.Dispose(); return; }
             IdentityBox.Text = _identity.DeviceId;
             MachineNameText.Text = Environment.MachineName;
             var addresses = NetworkInterface.GetAllNetworkInterfaces()
@@ -93,7 +94,7 @@ public partial class MainWindow : Window
                 if (File.Exists(_settingsPath) && new FileInfo(_settingsPath).Length <= 131072)
                     _devices = JsonSerializer.Deserialize<List<SavedDevice>>(await File.ReadAllTextAsync(_settingsPath)) ?? [];
             }
-            catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+            catch (Exception ex) when (ex is InvalidDataException or IOException or JsonException or UnauthorizedAccessException)
             { Log("Saved devices could not be loaded."); }
             FilterDevices();
             ConnectButton.IsEnabled = true;
@@ -187,7 +188,7 @@ public partial class MainWindow : Window
             AttachSession(session, true);
             session.Start();
         }
-        catch (Exception ex) when (ex is ArgumentException or IOException or SocketException or AuthenticationException or UnauthorizedAccessException or OperationCanceledException)
+        catch (Exception ex) when (ex is ArgumentException or InvalidDataException or IOException or SocketException or AuthenticationException or UnauthorizedAccessException or OperationCanceledException)
         {
             ErrorText.Text = ex switch
             {

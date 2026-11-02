@@ -19,6 +19,7 @@ public static class WireProtocol
         PropertyNameCaseInsensitive = false,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         MaxDepth = 8,
+        AllowDuplicateProperties = false,
         Converters = { new JsonStringEnumConverter<MessageType>(null, false) }
     };
 
