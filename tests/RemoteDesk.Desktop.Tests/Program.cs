@@ -37,6 +37,11 @@ internal static class Program
                 if (((TextBlock)window.FindName("StateText")).Text != "Disconnected") throw new Exception("Incorrect initial state.");
                 var visual = (FrameworkElement)window.Content;
                 visual.UpdateLayout();
+                var port = (TextBox)window.FindName("PortBox");
+                var lastDigit = port.GetRectFromCharacterIndex(port.Text.Length - 1);
+                var lastIdentity = id.GetRectFromCharacterIndex(id.Text.Length - 1);
+                if (lastDigit.Right > port.ActualWidth - port.Padding.Right + 1) throw new Exception("Port is clipped.");
+                if (lastIdentity.Bottom > id.ActualHeight - id.Padding.Bottom + 1) throw new Exception("Device fingerprint is clipped.");
                 var bitmap = new RenderTargetBitmap((int)visual.ActualWidth, (int)visual.ActualHeight, 96, 96, PixelFormats.Pbgra32);
                 bitmap.Render(visual);
                 var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));

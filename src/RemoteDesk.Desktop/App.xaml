@@ -24,7 +24,17 @@
       <Setter Property="Foreground" Value="#EAF0F8"/><Setter Property="Background" Value="#11151C"/><Setter Property="BorderBrush" Value="#354151"/>
       <Setter Property="CaretBrush" Value="#64AAFF"/><Setter Property="Padding" Value="12,10"/><Setter Property="FontSize" Value="13"/>
       <Setter Property="VerticalContentAlignment" Value="Center"/>
-      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox"><Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6"><Grid><ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/><TextBlock x:Name="Watermark" Text="{TemplateBinding Tag}" Foreground="#6F7F95" Margin="{TemplateBinding Padding}" IsHitTestVisible="False" Visibility="Collapsed" VerticalAlignment="Center"/></Grid></Border><ControlTemplate.Triggers><Trigger Property="Text" Value=""><Setter TargetName="Watermark" Property="Visibility" Value="Visible"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox"><Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6"><Grid><ScrollViewer x:Name="PART_ContentHost"/><TextBlock x:Name="Watermark" Text="{TemplateBinding Tag}" Foreground="#6F7F95" Margin="{TemplateBinding Padding}" IsHitTestVisible="False" Visibility="Collapsed" VerticalAlignment="Center"/></Grid></Border><ControlTemplate.Triggers><Trigger Property="Text" Value=""><Setter TargetName="Watermark" Property="Visibility" Value="Visible"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="ScrollBar">
+      <Setter Property="Width" Value="10"/><Setter Property="Background" Value="#11151B"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollBar">
+        <Border Background="{TemplateBinding Background}"><Track x:Name="PART_Track" Orientation="{TemplateBinding Orientation}" IsDirectionReversed="True">
+          <Track.DecreaseRepeatButton><RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False"/></Track.DecreaseRepeatButton>
+          <Track.Thumb><Thumb><Thumb.Template><ControlTemplate TargetType="Thumb"><Border Background="#3B4656" CornerRadius="4" Margin="2"/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
+          <Track.IncreaseRepeatButton><RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False"/></Track.IncreaseRepeatButton>
+        </Track></Border>
+      </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="#191D24"/><Setter Property="BorderBrush" Value="#2B323E"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="24"/></Style>
     <Style x:Key="Caption" TargetType="TextBlock"><Setter Property="Foreground" Value="#96A2B5"/><Setter Property="FontSize" Value="12"/><Setter Property="Margin" Value="0,0,0,8"/></Style>
