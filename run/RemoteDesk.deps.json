@@ -1,0 +1,105 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v10.0/win-x64",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v10.0": {},
+    ".NETCoreApp,Version=v10.0/win-x64": {
+      "RemoteDesk/1.0.0": {
+        "dependencies": {
+          "RemoteDesk.Agent": "1.0.0",
+          "RemoteDesk.Core": "1.0.0",
+          "RemoteDesk.Security": "1.0.0",
+          "RemoteDesk.Transport": "1.0.0"
+        },
+        "runtime": {
+          "RemoteDesk.dll": {}
+        }
+      },
+      "RemoteDesk.Agent/1.0.0": {
+        "dependencies": {
+          "RemoteDesk.Core": "1.0.0",
+          "RemoteDesk.Security": "1.0.0",
+          "RemoteDesk.Transport": "1.0.0"
+        },
+        "runtime": {
+          "RemoteDesk.Agent.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "RemoteDesk.Core/1.0.0": {
+        "runtime": {
+          "RemoteDesk.Core.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "RemoteDesk.Protocol/1.0.0": {
+        "runtime": {
+          "RemoteDesk.Protocol.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "RemoteDesk.Security/1.0.0": {
+        "runtime": {
+          "RemoteDesk.Security.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "RemoteDesk.Transport/1.0.0": {
+        "dependencies": {
+          "RemoteDesk.Core": "1.0.0",
+          "RemoteDesk.Protocol": "1.0.0",
+          "RemoteDesk.Security": "1.0.0"
+        },
+        "runtime": {
+          "RemoteDesk.Transport.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "RemoteDesk/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "RemoteDesk.Agent/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "RemoteDesk.Core/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "RemoteDesk.Protocol/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "RemoteDesk.Security/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "RemoteDesk.Transport/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}
