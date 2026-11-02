@@ -7,7 +7,7 @@ English Windows WPF client with numeric LAN discovery, per-device tabs, explicit
 Extract `run/RemoteDesk-win-x64-portable.zip` and launch `RemoteDesk.exe`. Runtime included. Update **both endpoints** to 0.3.1 / protocol v4; older builds intentionally fail closed. Alternatively run the framework-dependent EXE with all companions and .NET 10 Desktop Runtime x64.
 
 1. Open the app on both PCs on a trusted private LAN. Enter the Host's 12-digit ID in Connection center.
-2. Choose requested Control / Files / Effects permissions. Host explicitly chooses which to grant; screen approval alone never grants input or files.
+2. Choose requested Control / Files / Animations permissions. Host explicitly chooses which to grant; screen approval alone never grants input or files.
 3. A new tab opens beside Connection center. Up to **8 outgoing devices**, independently disconnectable, plus **1 incoming Controller**. Host admission stays single-controller to avoid competing input.
 4. Session toolbar: 5/15/20/24/30 target FPS; Fast/Balanced/Sharp resolution/quality; Fit/Actual size/Stretch; full screen (F11, Esc exits); input toggle; Files; admin/input-block requests. **Ctrl+Alt+F12 releases remote keyboard control.**
 5. Use Settings for the TCP port, availability, Host permission policy, shared folder and opt-in password-assisted automatic approval.
@@ -20,7 +20,7 @@ Numeric discovery is **LAN-only**, not an Internet AnyDesk service. No registry/
 - Independent full-size remote session tabs and a compact connection/settings workspace.
 - Primary-display GDI capture with **native downscaling before WIC**, binary JPEG frames (no base64 media), latest-frame-only background decoding, no old-frame backlog, frame pacing rather than a fixed 250-ms wait. Inactive tabs request 2 FPS and skip decoding. Actual receive FPS is displayed; target FPS is not a performance guarantee.
 - Explicit mouse/keyboard grant, coordinate mapping for display modes, bounded dedicated Windows input thread and release of remote-held keys on focus loss/disconnect. Ordinary interactive desktop only; Windows UIPI/UAC restrictions remain.
-- Files permission, sandboxed shared-folder browser, download/upload, acknowledged 32-KiB chunks, persistent cross-session resume, prefix validation for upload resume, final SHA-256, destination-volume staging and rename without overwrite. Max 8 GiB/file, 16 partial uploads / 16 GiB cache.
+- Explicit two-way Files permission (Controller sharing requires selecting Share my folder), sandboxed shared-folder browser, download/upload, acknowledged 32-KiB chunks, persistent cross-session resume, prefix validation for upload resume, final SHA-256, destination-volume staging and rename without overwrite. Max 8 GiB/file, 16 partial uploads / 16 GiB cache.
 - Session animation-disable option only with its own Host grant; normal cleanup restores previous values.
 - Admin restart request: disabled by default, explicit local Host confirmation and the **normal UAC prompt**, closes current process sessions and requires reconnect. No bypass, service install or background persistence.
 - Physical-input blocking request: disabled by default, fresh local consent, **mouse AND keyboard**, dedicated injection thread, maximum 30 seconds; Ctrl+Alt+Del, expiry, disconnect or process/thread exit releases it. Windows may refuse without elevation. Native behavior requires manual validation.

@@ -242,7 +242,7 @@ public partial class SessionView : UserControl, IAsyncDisposable
         FilesColumn.Width = FilesColumn.Width.Value > 0 ? new GridLength(0) : new GridLength(360);
         if (FilesColumn.Width.Value > 0) await ListAsync();
     }
-    private async Task ListAsync()
+    private async Task<bool> ListAsync()
     {
         try
         {
@@ -251,9 +251,9 @@ public partial class SessionView : UserControl, IAsyncDisposable
             var reply = await Session.RequestAsync(RemoteCommand.Create(Operation.ListFiles, _directory), _lifetime);
             FileList.ItemsSource = reply.Entries ?? []; FolderPath.Text = "/" + _directory;
             RemoteFolderInfo.Text = "Other device shares: " + info.Path;
-            TransferText.Text = $"{reply.Entries?.Length ?? 0} entries. Double-click a folder. Upload writes to that device’s shared root; Download saves locally.";
+            TransferText.Text = $"{reply.Entries?.Length ?? 0} entries. Double-click a folder. Upload writes to that device’s shared root; Download saves locally."; return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException) { FileList.ItemsSource = null; RemoteFolderInfo.Text = "No accessible remote folder"; TransferText.Text = ex.Message; SetStatus(ex.Message); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException) { FileList.ItemsSource = null; RemoteFolderInfo.Text = "No accessible remote folder"; TransferText.Text = ex.Message; SetStatus(ex.Message); return false; }
     }
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await ListAsync();
     private async void Up_Click(object sender, RoutedEventArgs e) { _directory = _directory.Contains('/') ? _directory[.._directory.LastIndexOf('/')] : ""; await ListAsync(); }
@@ -271,22 +271,29 @@ public partial class SessionView : UserControl, IAsyncDisposable
     {
         if (_transfer is not null) { TransferText.Text = "Pause the current transfer first."; return; }
         _transfer = CancellationTokenSource.CreateLinkedTokenSource(_lifetime);
-        try { await action(_transfer.Token); await ListAsync(); }
+        try
+        {
+            await action(_transfer.Token);
+            bool listed = await ListAsync();
+            TransferText.Text = listed ? "Transfer complete; SHA-256 verified. Remote folder refreshed." : "Transfer complete; SHA-256 verified. Folder refresh failed: " + TransferText.Text;
+        }
         catch (OperationCanceledException) { TransferText.Text = "Paused/disconnected. Reconnect and choose the same file/destination to resume."; }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException) { TransferText.Text = ex.Message; }
         finally { _transfer.Dispose(); _transfer = null; }
     }
+    public Task UploadFileAsync(string source) => TransferAsync(token => FileTransferClient.UploadAsync(Session, source, TransferProgress(), token));
+    public Task DownloadFileAsync(string remote, string destination) => TransferAsync(token => FileTransferClient.DownloadAsync(Session, remote, destination, TransferProgress(), token));
     private async void Upload_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog { Title = "Upload to the other device’s shared-folder root (no overwrite)" };
-        if (dialog.ShowDialog(Window.GetWindow(this)) == true) await TransferAsync(token => FileTransferClient.UploadAsync(Session, dialog.FileName, TransferProgress(), token));
+        if (dialog.ShowDialog(Window.GetWindow(this)) == true) await UploadFileAsync(dialog.FileName);
     }
     private async void Download_Click(object sender, RoutedEventArgs e)
     {
         if (FileList.SelectedItem is not FileEntry { Directory: false } entry) return;
         var dialog = new SaveFileDialog { FileName = entry.Name, Title = "Download / resume to the same destination", OverwritePrompt = false };
         string remote = string.IsNullOrEmpty(_directory) ? entry.Name : _directory + "/" + entry.Name;
-        if (dialog.ShowDialog(Window.GetWindow(this)) == true) await TransferAsync(token => FileTransferClient.DownloadAsync(Session, remote, dialog.FileName, TransferProgress(), token));
+        if (dialog.ShowDialog(Window.GetWindow(this)) == true) await DownloadFileAsync(remote, dialog.FileName);
     }
     private void CancelTransfer_Click(object sender, RoutedEventArgs e) => _transfer?.Cancel();
     public async ValueTask DisposeAsync()

@@ -13,6 +13,12 @@
 
 CI uses one Windows runner and isolated test identities/temporary folders. Test auto-grants are explicit fixture policy, not a production consent bypass. Exact source/workflow is in run/BUILD-INFO.md. CI does **not** establish physical LAN latency, all GPU/OS behavior, real UAC/keyboard blocking or production security certification.
 
+### 0.3.1 regression gates
+
+Actual MainWindow approval over real TLS: disabled grants explain local policy; changing same-port policy while approving preserves the request and enables eligible checkboxes. Files can be granted without a root; no data is served until a folder is explicitly selected. Production runtime lists both selected roots, uploads both directions and downloads in reverse. A Controller root is never served silently; share revocation rejects subsequent RPC. Host cannot exploit symmetric file RPC for reverse admin/input/effects.
+
+Animation toggle remains checked only after acknowledgement; restoring and policy-denied rollback are exercised. Admin policy denial persists separately from frame counters; fake local confirmation exercises acceptance/rejection and already-elevated state, and launcher configuration requires the normal runas/UAC verb. The runner never approves native elevation. Responsive widths and non-null window icon are checked.
+
 ## Physical Windows release gates (pending)
 
 Record OS builds/security patches, GPU/driver, DPI/HDR/primary resolution, adapter/subnet, firewall profile, source/package and number of concurrent tabs.

@@ -33,8 +33,11 @@ internal static class Program
                 string path = args.Length > 0 ? args[0] : "RemoteDesk-workspace.png";
                 Screenshot(window, path);
                 TestResponsiveLayout(window);
+                double originalWidth = window.Width; window.Width = 1400; await Task.Delay(150); window.UpdateLayout();
+                Screenshot(window, Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!, "RemoteDesk-workspace-wide.png"));
+                window.Width = originalWidth; await Task.Delay(100);
                 if (window.Icon is null) throw new Exception("Application window icon missing.");
-                var launch = ElevationLauncher.CreateStartInfo("C:\\RemoteDesk\\RemoteDesk.exe", "C:\\RemoteDesk");
+                var launch = ElevationLauncher.CreateStartInfo(@"C:\RemoteDesk\RemoteDesk.exe", @"C:\RemoteDesk");
                 if (!launch.UseShellExecute || launch.Verb != "runas") throw new Exception("Admin restart does not invoke normal UAC.");
                 var number = (TextBox)window.FindName("IdentityBox");
                 if (number.GetRectFromCharacterIndex(number.Text.Length - 1, true).Right > number.ActualWidth - number.Padding.Right + 1)
@@ -133,11 +136,13 @@ internal static class Program
             var own = await client.RequestAsync(RemoteCommand.Create(Operation.ListFiles, ""), deadline.Token);
             if (own.Entries?.Any(e => e.Name == "from-host.txt") != true) throw new Exception("Configured Host folder is not served by production runtime.");
             string source = Path.Combine(temporary, "upload.bin"); await File.WriteAllBytesAsync(source, Enumerable.Range(0, 90000).Select(i => (byte)i).ToArray());
-            await FileTransferClient.UploadAsync(client, source, null, deadline.Token);
-            await FileTransferClient.UploadAsync(hostView.Session, source, null, deadline.Token);
+            await clientView.UploadFileAsync(source);
+            await hostView.UploadFileAsync(source);
             if (!File.Exists(Path.Combine(hostRoot, "upload.bin")) || !File.Exists(Path.Combine(clientRoot, "upload.bin"))) throw new Exception("Two-way upload did not reach both selected roots.");
             string downloaded = Path.Combine(temporary, "download.bin");
-            await FileTransferClient.DownloadAsync(hostView.Session, "upload.bin", downloaded, null, deadline.Token);
+            await hostView.DownloadFileAsync("upload.bin", downloaded);
+            if (!((TextBlock)hostView.FindName("TransferText")).Text.Contains("Transfer complete; SHA-256 verified")) throw new Exception("Transfer completion was erased by folder refresh.");
+            Screenshot(window, Path.Combine(screenshots, "RemoteDesk-files.png"));
             byte[] expectedBytes = await File.ReadAllBytesAsync(source), downloadedBytes = await File.ReadAllBytesAsync(downloaded);
             if (!expectedBytes.SequenceEqual(downloadedBytes)) throw new Exception("Reverse download corrupted content.");
             // Host must never use symmetric file RPC to request input/admin/effects on Controller.

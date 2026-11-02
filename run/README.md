@@ -5,7 +5,7 @@ Extract `RemoteDesk-win-x64-portable.zip` and run the extracted `RemoteDesk.exe`
 ## Connect and control
 
 - Enter the destination's 12-digit ID on the SAME trusted Private LAN. IP entry is not required; manual full-pin setup remains in the advanced expander.
-- Select Control / Files / Effects to request them. On the Host, approve screen viewing and separately check the permissions you want to grant; disabled boxes include a visible reason. A grey control/file button means permission was not granted or Host policy/shared folder is not configured.
+- Select Control / Files / Animations to request them. On the Host, approve screen viewing and separately check the permissions you want to grant; disabled boxes include a visible reason. A grey control/file button means permission was not granted or the negotiated grant or local policy disallows the action.
 - A new full-size tab opens for each device. Up to 8 outgoing tabs, independently closable. One incoming Controller per Host.
 - Target FPS: 5, 15, 20, 24, 30. Fast = 960px / JPEG 40; Balanced = 1440px / 55; Sharp = 1920px / 80. Actual receive FPS is in the status strip; 30 is not guaranteed. Inactive tabs reduce to 2 FPS.
 - Display: Fit / Actual size (scrollable) / Stretch. F11 enters/exits full screen; Esc exits full screen. **Ctrl+Alt+F12 releases remote input.** Click the remote image to focus keyboard control. Focus/tab loss releases remote-held keys.
@@ -18,7 +18,7 @@ Settings configures the incoming TCP port (1024–65535), startup availability, 
 
 **Resume:** pause or reconnect after interruption and choose the same source file / download destination. Acknowledged data is retained; upload prefixes and final files are hash-checked. Downloads use adjacent `.remotedesk.part` and `.json` sidecars and final SHA-256. Do not delete parts you wish to resume. A changed/corrupted partial is rejected, not silently trusted. Existing final files are never overwritten. Resume does not bypass a new session's permission prompt.
 
-**Animations:** enable the Host policy and grant Effects for that session before selecting No animations. It changes Windows UI animation flags temporarily and restores them during normal cleanup. A crash can require restoring Windows animation preferences manually.
+**Animations:** enable the Host policy and grant Animations for that session before selecting No animations. It changes Windows UI animation flags temporarily and restores them during normal cleanup. A crash can require restoring Windows animation preferences manually.
 
 **Admin:** enable admin restart requests on the Host. The Controller requests, the local Host confirms, then Windows presents its ordinary UAC prompt. Current process sessions close; reconnect after approval. A different Windows account can have a different device ID. This is not a Secure Desktop/UAC bypass or a permanent elevated service.
 
@@ -42,7 +42,7 @@ Primary display, GDI/JPEG over TLS/TCP, not H.264/WebRTC. Protected/locked/UAC/H
 
 ## 0.3.1 corrections — update both endpoints
 
-Protocol v4 is required; 0.3.1 endpoints intentionally cannot connect to 0.3.1. The window/taskbar/EXE now use a multi-size RemoteDesk icon. Connection center uses available window width and the remaining height for activity instead of a fixed 760px layout.
+Protocol v4 is required; older protocol-v3 endpoints intentionally cannot connect to 0.3.1. The window/taskbar/EXE now use a multi-size RemoteDesk icon. Connection center uses available window width and the remaining height for activity instead of a fixed 760px layout.
 
 **Which folder belongs to whom?** `Remote files` always shows the OTHER device's selected folder and its actual path. The Host's approved configured folder is served on connection. To expose a Controller-side folder back to that Host, choose `Share my folder…` on the Controller's session; on the Host's incoming tab click `Remote files` / `Refresh`. Either side can `Stop sharing`. This is explicit per-session sharing, not automatic exposure of every Controller's saved folder. File exchange must be granted, but a preselected root is no longer required to check the Files approval box.
 
