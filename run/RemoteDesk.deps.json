@@ -13,8 +13,10 @@
           "RemoteDesk.Capture": "1.0.0",
           "RemoteDesk.Core": "1.0.0",
           "RemoteDesk.Discovery": "1.0.0",
+          "RemoteDesk.Files": "1.0.0",
           "RemoteDesk.Security": "1.0.0",
-          "RemoteDesk.Transport": "1.0.0"
+          "RemoteDesk.Transport": "1.0.0",
+          "RemoteDesk.Windows": "1.0.0"
         },
         "runtime": {
           "RemoteDesk.dll": {}
@@ -63,6 +65,17 @@
           }
         }
       },
+      "RemoteDesk.Files/1.0.0": {
+        "dependencies": {
+          "RemoteDesk.Transport": "1.0.0"
+        },
+        "runtime": {
+          "RemoteDesk.Files.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
       "RemoteDesk.Protocol/1.0.0": {
         "runtime": {
           "RemoteDesk.Protocol.dll": {
@@ -87,6 +100,17 @@
         },
         "runtime": {
           "RemoteDesk.Transport.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "RemoteDesk.Windows/1.0.0": {
+        "dependencies": {
+          "RemoteDesk.Protocol": "1.0.0"
+        },
+        "runtime": {
+          "RemoteDesk.Windows.dll": {
             "assemblyVersion": "1.0.0.0",
             "fileVersion": "1.0.0.0"
           }
@@ -120,6 +144,11 @@
       "serviceable": false,
       "sha512": ""
     },
+    "RemoteDesk.Files/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
     "RemoteDesk.Protocol/1.0.0": {
       "type": "project",
       "serviceable": false,
@@ -131,6 +160,11 @@
       "sha512": ""
     },
     "RemoteDesk.Transport/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "RemoteDesk.Windows/1.0.0": {
       "type": "project",
       "serviceable": false,
       "sha512": ""
