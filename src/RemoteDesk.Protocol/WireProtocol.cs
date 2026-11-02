@@ -72,7 +72,7 @@ public static class WireProtocol
                 if (c.Id == Guid.Empty || !Enum.IsDefined(c.Operation) || c.Path?.Length > 1024 || c.Data?.Length > 32768 ||
                     c.Offset is < 0 or > 8L * 1024 * 1024 * 1024 || c.Length is < 0 or > 8L * 1024 * 1024 * 1024 ||
                     c.Hash is not null && (c.Hash.Length != 64 || !c.Hash.All(Uri.IsHexDigit)) || c.Error?.Length > 256 || c.Entries?.Length > 256 ||
-                    c.Entries?.Any(e => string.IsNullOrEmpty(e.Name) || e.Name.Length > 255 || e.Size < 0) == true ||
+                    c.Entries?.Any(e => string.IsNullOrEmpty(e.Name) || e.Name.Length > 255 || e.Name.Any(char.IsControl) || e.Name.Contains('/') || e.Name.Contains('\\') || e.Name.Contains(':') || e.Size < 0) == true ||
                     (c.Operation == Operation.SetStream && (c.Fps is < 1 or > 30 || c.Width is < 640 or > 1920 || c.Quality is < 20 or > 85)))
                     throw new InvalidDataException("Invalid command.");
             }

@@ -15,8 +15,12 @@ public sealed class SharedFolderService
     {
         _root = Path.GetFullPath(root); _cache = Path.GetFullPath(cache);
         _peer = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(peer)));
-        if (!Directory.Exists(_root)) throw new DirectoryNotFoundException("Choose an existing shared folder in Settings.");
-        RejectLinks(_root); Directory.CreateDirectory(_cache); RejectLinks(_cache);
+        ValidateRoot(_root); Directory.CreateDirectory(_cache); RejectLinks(_cache);
+    }
+    public static void ValidateRoot(string root)
+    {
+        if (!Directory.Exists(root)) throw new DirectoryNotFoundException("Choose an existing shared folder in Settings.");
+        RejectLinks(root);
     }
     private static void RejectLinks(string path)
     {
@@ -27,7 +31,7 @@ public sealed class SharedFolderService
     private string SafePath(string? relative)
     {
         relative ??= "";
-        if (Path.IsPathRooted(relative) || relative.Contains(':') || relative.Contains('\\') || relative.Split('/').Any(p => p is "." or ".." || p.EndsWith('.') || p.EndsWith(' ') || System.Text.RegularExpressions.Regex.IsMatch(p, @"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)))
+        if (Path.IsPathRooted(relative) || relative.Contains(':') || relative.Contains('\\') || relative.Split('/').Any(p => p is "." or ".." || p.StartsWith(".remotedesk-", StringComparison.OrdinalIgnoreCase) || p.EndsWith('.') || p.EndsWith(' ') || System.Text.RegularExpressions.Regex.IsMatch(p, @"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)))
             throw new UnauthorizedAccessException("Invalid shared path.");
         string full = Path.GetFullPath(Path.Combine(_root, relative.Replace('/', Path.DirectorySeparatorChar)));
         string prefix = _root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
@@ -59,7 +63,7 @@ public sealed class SharedFolderService
         {
             case Operation.ListFiles:
                 string dir = SafePath(c.Path);
-                var entries = Directory.EnumerateFileSystemEntries(dir).Take(257).ToArray();
+                var entries = Directory.EnumerateFileSystemEntries(dir).Where(p => !Path.GetFileName(p).StartsWith(".remotedesk-", StringComparison.OrdinalIgnoreCase)).Take(257).ToArray();
                 if (entries.Length > 256) return c.Fail("This folder has more than 256 entries. Share a smaller subfolder.");
                 var items = new List<FileEntry>();
                 foreach (string path in entries)
@@ -112,6 +116,8 @@ public sealed class SharedFolderService
                 return c.Reply() with { Offset = offset, Hash = await HashAsync(part, token, offset) };
             case Operation.WriteChunk:
                 if (c.Hash is null || c.Data is not { Length: > 0 }) return c.Fail("Missing chunk.");
+                if (Directory.EnumerateFiles(_cache, "*.part").Sum(f => new FileInfo(f).Length) + c.Data.Length > 16L * 1024 * 1024 * 1024)
+                    return c.Fail("Partial-transfer disk quota reached. Clean completed/unneeded parts locally.");
                 string chunkPath = Part(c.Hash); RejectLinks(chunkPath); RejectLinks(chunkPath + ".json");
                 var upload = JsonSerializer.Deserialize<Upload>(await File.ReadAllTextAsync(chunkPath + ".json", token)) ?? throw new InvalidDataException();
                 await using (var output = new FileStream(chunkPath, FileMode.Open, FileAccess.Write, FileShare.None, 32768, true))
@@ -126,7 +132,16 @@ public sealed class SharedFolderService
                 var metadata = JsonSerializer.Deserialize<Upload>(await File.ReadAllTextAsync(finished + ".json", token)) ?? throw new InvalidDataException();
                 if (new FileInfo(finished).Length != metadata.Size || await HashAsync(finished, token) != metadata.Hash)
                     return c.Fail("Final SHA-256 failed. Resume/reset and retry.");
-                File.Move(finished, SafePath(metadata.Name), false); File.Delete(finished + ".json");
+                string final = SafePath(metadata.Name);
+                string staged = Path.Combine(_root, ".remotedesk-" + _peer + "-" + c.Hash + ".incoming");
+                RejectLinks(staged);
+                // Stage on the destination volume, then rename without overwrite. A cancelled
+                // cross-volume commit never exposes an unverified partial under the final name.
+                await using (var source = new FileStream(finished, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true))
+                await using (var target = new FileStream(staged, FileMode.Create, FileAccess.Write, FileShare.None, 65536, true))
+                { await source.CopyToAsync(target, token); await target.FlushAsync(token); }
+                if (await HashAsync(staged, token) != metadata.Hash) return c.Fail("Destination staging hash failed.");
+                File.Move(staged, final, false); File.Delete(finished); File.Delete(finished + ".json");
                 return c.Reply() with { Offset = metadata.Size };
             default: return c.Fail("Not a file operation.");
         }

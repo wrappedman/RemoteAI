@@ -13,18 +13,26 @@ namespace RemoteDesk.Capture;
 public sealed class DesktopCapture : IDisposable
 {
     private IntPtr _screen, _memory, _bitmap, _oldBitmap;
-    private int _width, _height;
+    private int _width, _height, _sourceWidth, _sourceHeight;
     public byte[] Capture(int maxWidth = 1440, int qualityLevel = 55)
     {
         int width = GetSystemMetrics(0), height = GetSystemMetrics(1);
         if (width is < 1 or > 16384 || height is < 1 or > 8192 || (long)width * height > 70_000_000)
             throw new IOException("Unsupported display dimensions.");
-        if (_bitmap == IntPtr.Zero || width != _width || height != _height) Initialize(width, height);
-        if (!BitBlt(_memory, 0, 0, width, height, _screen, 0, 0, 0x40CC0020)) throw new Win32Exception();
-        var source = Imaging.CreateBitmapSourceFromHBitmap(_bitmap, IntPtr.Zero, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
         maxWidth = Math.Clamp(maxWidth, 640, 1920); qualityLevel = Math.Clamp(qualityLevel, 20, 85);
         double scale = Math.Min(1, Math.Min((double)maxWidth / width, 1200d / height));
-        BitmapSource scaled = scale < 1 ? new TransformedBitmap(source, new ScaleTransform(scale, scale)) : source;
+        int outputWidth = Math.Max(1, (int)(width * scale)), outputHeight = Math.Max(1, (int)(height * scale));
+        if (_bitmap == IntPtr.Zero || outputWidth != _width || outputHeight != _height || width != _sourceWidth || height != _sourceHeight)
+        {
+            Initialize(outputWidth, outputHeight); _sourceWidth = width; _sourceHeight = height;
+        }
+        // Scale in GDI before crossing into WPF/WIC: do not clone a full 4K bitmap and
+        // then run a second managed transform for every frame.
+        bool copied = outputWidth == width && outputHeight == height
+            ? BitBlt(_memory, 0, 0, width, height, _screen, 0, 0, 0x40CC0020)
+            : StretchBlt(_memory, 0, 0, outputWidth, outputHeight, _screen, 0, 0, width, height, 0x40CC0020);
+        if (!copied) throw new Win32Exception();
+        var scaled = Imaging.CreateBitmapSourceFromHBitmap(_bitmap, IntPtr.Zero, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
         scaled.Freeze();
         foreach (int quality in new[] { qualityLevel, 35, 20 }.Distinct())
         {
@@ -47,6 +55,7 @@ public sealed class DesktopCapture : IDisposable
         _bitmap = CreateCompatibleBitmap(_screen, width, height);
         if (_memory == IntPtr.Zero || _bitmap == IntPtr.Zero) { Dispose(); throw new Win32Exception(); }
         _oldBitmap = SelectObject(_memory, _bitmap);
+        _ = SetStretchBltMode(_memory, 3); // COLORONCOLOR: fast downscale; sharp profile uses native width where possible.
         if (_oldBitmap == IntPtr.Zero || _oldBitmap == new IntPtr(-1)) { Dispose(); throw new Win32Exception(); }
         _width = width; _height = height;
     }
@@ -58,6 +67,9 @@ public sealed class DesktopCapture : IDisposable
         if (_screen != IntPtr.Zero) _ = ReleaseDC(IntPtr.Zero, _screen);
         _oldBitmap = _bitmap = _memory = _screen = IntPtr.Zero;
     }
+    [DllImport("gdi32.dll")] private static extern int SetStretchBltMode(IntPtr dc, int mode);
+    [DllImport("gdi32.dll", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool StretchBlt(IntPtr target, int x, int y, int width, int height, IntPtr source, int sourceX, int sourceY, int sourceWidth, int sourceHeight, uint operation);
     [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
     [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr window);
     [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr window, IntPtr dc);

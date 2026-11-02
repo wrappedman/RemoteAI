@@ -6,13 +6,13 @@
     <CheckBox x:Name="ControlCheck" Content="Control input" Margin="0,0,16,0" Checked="Control_Changed" Unchecked="Control_Changed"/>
     <TextBlock Text="FPS" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="#91A3BA"/>
     <ComboBox x:Name="FpsBox" Width="65" SelectionChanged="Profile_Changed" Margin="0,0,10,0"><ComboBoxItem Content="5"/><ComboBoxItem Content="15"/><ComboBoxItem Content="20"/><ComboBoxItem Content="24"/><ComboBoxItem Content="30"/></ComboBox>
-    <ComboBox x:Name="QualityBox" Width="118" SelectedIndex="1" SelectionChanged="Profile_Changed" Margin="0,0,10,0"><ComboBoxItem Content="Fast · 960px"/><ComboBoxItem Content="Balanced · 1440px"/><ComboBoxItem Content="Sharp · 1920px"/></ComboBox>
+    <ComboBox x:Name="QualityBox" Width="102" SelectedIndex="1" SelectionChanged="Profile_Changed" Margin="0,0,10,0"><ComboBoxItem Content="Fast" ToolTip="960px / JPEG quality 40"/><ComboBoxItem Content="Balanced" ToolTip="1440px / JPEG quality 55"/><ComboBoxItem Content="Sharp" ToolTip="1920px / JPEG quality 80"/></ComboBox>
     <ComboBox x:Name="DisplayBox" Width="100" SelectedIndex="0" SelectionChanged="Display_Changed" Margin="0,0,10,0"><ComboBoxItem Content="Fit"/><ComboBoxItem Content="Actual size"/><ComboBoxItem Content="Stretch"/></ComboBox>
     <CheckBox x:Name="AnimationsCheck" Content="No animations" Margin="0,0,12,0" Checked="Animations_Changed" Unchecked="Animations_Changed"/>
     <Button Content="Full screen · F11" Padding="10,6" Click="FullScreen_Click" Margin="0,0,6,0"/>
     <Button x:Name="FilesButton" Content="Files" Padding="10,6" Click="Files_Click" Margin="0,0,6,0"/>
     <Button x:Name="AdminButton" Content="Request admin" Padding="10,6" Click="Admin_Click" Margin="0,0,6,0"/>
-    <Button x:Name="LockButton" Content="Block local input…" Padding="10,6" Click="Lock_Click" Margin="0,0,6,0"/>
+    <Button x:Name="LockButton" Content="Block local input…" ToolTip="Requires new Host consent. Blocks physical mouse AND keyboard for up to 30 seconds. Ctrl+Alt+Del releases locally." Padding="10,6" Click="Lock_Click" Margin="0,0,6,0"/>
     <Button x:Name="ViewerDisconnectButton" Content="Disconnect" Padding="10,6" Background="#512936" Click="Disconnect_Click"/>
    </WrapPanel>
   </Border>

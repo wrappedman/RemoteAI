@@ -70,7 +70,7 @@ public sealed class LanAgent(DeviceIdentity identity) : IAsyncDisposable
             session.Start();
             await session.Completion.WaitAsync(activeStop.Token).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is InvalidDataException or IOException or SocketException or AuthenticationException or OperationCanceledException or ObjectDisposedException)
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException or SocketException or AuthenticationException or OperationCanceledException or ObjectDisposedException)
         { Audit?.Invoke(_stop.IsCancellationRequested ? "Agent stopped." : $"Incoming connection ended or failed authentication ({ex.GetType().Name})."); }
         finally
         {

@@ -30,7 +30,10 @@ public sealed class HostSessionRuntime : IDisposable
             _input = new(); _input.Status += status; session.InputReceived += _input.Post;
         }
         if (session.Permissions.FileAccess && !string.IsNullOrEmpty(settings.SharedFolder))
-            _files = new(settings.SharedFolder, AppSettings.TransferCache, session.PeerId);
+        {
+            try { _files = new(settings.SharedFolder, AppSettings.TransferCache, session.PeerId); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _status("Shared folder unavailable; no file access is served."); }
+        }
         session.CommandHandler = HandleAsync;
         if (session.CanSendScreen) session.StartScreenProducer(ProduceAsync);
     }

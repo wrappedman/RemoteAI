@@ -243,7 +243,7 @@ public sealed class SecureSession : IAsyncDisposable
         var promise = new TaskCompletionSource<RemoteCommand>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!_pending.TryAdd(command.Id, promise)) throw new InvalidOperationException("Duplicate request.");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token, _stop.Token);
-        timeout.CancelAfter(TimeSpan.FromSeconds(120));
+        timeout.CancelAfter(TimeSpan.FromSeconds(command.Operation is Operation.ReadInfo or Operation.WriteBegin or Operation.WriteComplete ? 600 : 120));
         try
         {
             await SendAsync(MessageType.Command, timeout.Token, new(Command: command)).ConfigureAwait(false);

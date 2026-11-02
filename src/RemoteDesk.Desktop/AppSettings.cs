@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using RemoteDesk.Security;
+using RemoteDesk.Files;
 namespace RemoteDesk.Desktop;
 
 public sealed class AppSettings
@@ -43,6 +44,17 @@ public sealed class AppSettings
         TrustedControllers = TrustedControllers.Select(DeviceIdentity.NormalizeId).Distinct().ToList();
         SharedFolder ??= "";
         if (SharedFolder.Length > 1024 || (SharedFolder.Length > 0 && !Directory.Exists(SharedFolder))) throw new ArgumentException("Choose an existing shared folder or leave it empty.");
+        if (SharedFolder.Length > 0)
+        {
+            string full = Path.GetFullPath(SharedFolder).TrimEnd(Path.DirectorySeparatorChar);
+            string root = Path.GetPathRoot(full)!.TrimEnd(Path.DirectorySeparatorChar);
+            string data = Path.GetFullPath(DataDirectory).TrimEnd(Path.DirectorySeparatorChar);
+            if (full.Equals(root, StringComparison.OrdinalIgnoreCase) || full.Equals(data, StringComparison.OrdinalIgnoreCase) ||
+                data.StartsWith(full + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || full.StartsWith(data + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("Share a dedicated subfolder, not an entire drive, profile ancestor or RemoteDesk settings/cache folder.");
+            try { SharedFolderService.ValidateRoot(full); }
+            catch (UnauthorizedAccessException) { throw new ArgumentException("The shared folder and its ancestors cannot be symbolic links/reparse points."); }
+        }
         if (PasswordAccess && (string.IsNullOrEmpty(ProtectedPasswordVerifier) || TrustedControllers.Count == 0))
             throw new ArgumentException("Password access needs a 16+ character password and at least one explicitly trusted Controller (approve and check Trust first).");
     }
