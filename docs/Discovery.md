@@ -1,4 +1,4 @@
-# Numeric ID discovery (workspace 0.3)
+# Numeric ID discovery (workspace 0.3.1)
 
 ## Scope
 

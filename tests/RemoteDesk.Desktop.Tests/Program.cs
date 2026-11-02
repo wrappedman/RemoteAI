@@ -51,6 +51,7 @@ internal static class Program
                 if (!PasswordVerifier.Verify(verifier, "Test-only-unique-password-123!") || PasswordVerifier.Verify(verifier, "wrong-password-123!")) throw new Exception("DPAPI/PBKDF2 verifier failed.");
                 using (var input = new InputController()) input.Post(new(InputKind.ReleaseAll)); // No synthetic keys or physical blocking in CI.
                 await TestConsentAndFilesAsync(window, Path.GetDirectoryName(Path.GetFullPath(path))!);
+                await TestAdminContractAsync();
                 await TestTabsAsync(window, Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!, "RemoteDesk-viewer.png"));
                 Console.WriteLine("PASS: multiple full-size session tabs, numeric discovery, real desktop capture/binary transfer/background decoding, frame refresh, independent disconnect, fullscreen, settings, DPAPI password verifier and input worker cleanup.");
                 window.Closed += (_, _) => app.Shutdown(0); window.Close();
@@ -137,7 +138,8 @@ internal static class Program
             if (!File.Exists(Path.Combine(hostRoot, "upload.bin")) || !File.Exists(Path.Combine(clientRoot, "upload.bin"))) throw new Exception("Two-way upload did not reach both selected roots.");
             string downloaded = Path.Combine(temporary, "download.bin");
             await FileTransferClient.DownloadAsync(hostView.Session, "upload.bin", downloaded, null, deadline.Token);
-            if (!(await File.ReadAllBytesAsync(source)).SequenceEqual(await File.ReadAllBytesAsync(downloaded))) throw new Exception("Reverse download corrupted content.");
+            byte[] expectedBytes = await File.ReadAllBytesAsync(source), downloadedBytes = await File.ReadAllBytesAsync(downloaded);
+            if (!expectedBytes.SequenceEqual(downloadedBytes)) throw new Exception("Reverse download corrupted content.");
             // Host must never use symmetric file RPC to request input/admin/effects on Controller.
             try { await hostView.Session.RequestAsync(RemoteCommand.Create(Operation.RequestAdmin), deadline.Token); throw new Exception("Reverse admin command allowed."); }
             catch (UnauthorizedAccessException) { }
@@ -163,6 +165,37 @@ internal static class Program
             Console.WriteLine("PASS: real local approval, policy explanations/hot-save, selected checkbox grants, production two-way folder listing/upload/download, explicit Controller share/revoke, animation acknowledgement/rollback, persistent admin errors, reverse-sensitive-command denial and UAC launch contract.");
         }
         finally { Directory.Delete(temporary, true); }
+    }
+    private static async Task TestAdminContractAsync()
+    {
+        using var hostIdentity = DeviceIdentity.CreateForTesting(); using var controllerIdentity = DeviceIdentity.CreateForTesting();
+        bool accepted = false, elevated = false; int confirmations = 0;
+        await using var host = new LanAgent(hostIdentity)
+        {
+            Authorize = (_, _) => Task.FromResult<SessionGrant?>(new(false, true)),
+            Established = session =>
+            {
+                var runtime = new HostSessionRuntime(session, new AppSettings { AllowAdminRequests = true },
+                    _ => { confirmations++; return Task.FromResult(accepted); }, _ => { }, () => elevated);
+                _ = DisposeRuntimeAsync(session, runtime); return Task.CompletedTask;
+            }
+        };
+        host.Start(0, IPAddress.Loopback);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await using var controller = await SecureSession.ConnectAsync("127.0.0.1", host.Port, hostIdentity.DeviceId, "Admin regression", controllerIdentity,
+            _ => { }, deadline.Token, requested: new(false, true));
+        controller.Start();
+        try { await controller.RequestAsync(RemoteCommand.Create(Operation.RequestAdmin), deadline.Token); throw new Exception("Admin rejection ignored."); }
+        catch (IOException ex) when (ex.Message.Contains("declined")) { }
+        if (confirmations != 1) throw new Exception("Admin request bypassed local confirmation.");
+        accepted = true;
+        await controller.RequestAsync(RemoteCommand.Create(Operation.RequestAdmin), deadline.Token);
+        if (confirmations != 2) throw new Exception("Admin acceptance did not invoke explicit confirmation.");
+        elevated = true;
+        var already = await controller.RequestAsync(RemoteCommand.Create(Operation.RequestAdmin), deadline.Token);
+        if (already.Path != "already-elevated" || confirmations != 2) throw new Exception("Already-elevated Host did not report its state.");
+        await controller.DisconnectAsync();
+        Console.WriteLine("PASS: admin policy, explicit local rejection/acceptance, already-elevated response. Native UAC approval intentionally manual.");
     }
     private static LanAgent CreateHost(DeviceIdentity identity) => new(identity)
     {

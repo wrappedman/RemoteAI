@@ -1,4 +1,4 @@
-# Security model — 0.3 development preview
+# Security model — 0.3.1 development preview
 
 ## Identity, first contact and encryption
 
@@ -30,7 +30,7 @@ Settings are current-user JSON with atomic replacement. Local malicious edits ar
 
 ## Bounds / privacy / release blockers
 
-Protocol v3: required strict JSON, no duplicate/unknown fields, bounded nesting, validated input/ranges, binary JPEG size/dimension cap, session/sequence/ID replay checks capped at one million IDs/direction. RPC promises ≤16, commands ≤32, input queue ≤256, decode queue one latest frame. File hash/disk work is off the receive/heartbeat path. Native codecs still require Windows security updates and fuzzing; length limits are not a codec security audit.
+Protocol v4: required strict JSON, no duplicate/unknown fields, bounded nesting, validated input/ranges, binary JPEG size/dimension cap, session/sequence/ID replay checks capped at one million IDs/direction. RPC promises ≤16, commands ≤32, input queue ≤256, decode queue one latest frame. File hash/disk work is off the receive/heartbeat path. Native codecs still require Windows security updates and fuzzing; length limits are not a codec security audit.
 
 Live screen bytes and passwords are never logged or saved by the running app. CI captures workspace screenshots only as test artifacts. Audit is capped in-memory, not durable enterprise logging. Partial file contents are stored on the chosen disk/Windows profile, not app-encrypted; protect ACLs and clean caches explicitly. After disconnect the image and input ownership are released; a stale frame is labeled after five seconds.
 

@@ -1,6 +1,6 @@
-# Media performance in 0.3
+# Media performance in 0.3.1
 
-The old 0.2 loop imposed a 250-ms delay **after** capture/encode/send and rendered on an 8-FPS UI timer. It was a view-only baseline, not smooth media. 0.3 removes those deliberate ceilings:
+The old 0.2 loop imposed a 250-ms delay **after** capture/encode/send and rendered on an 8-FPS UI timer. It was a view-only baseline, not smooth media. 0.3.1 removes those deliberate ceilings:
 
 - native GDI downscale before WPF/WIC, cached bitmap/DC per geometry;
 - binary JPEG envelope instead of base64 JSON;

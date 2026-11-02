@@ -122,7 +122,7 @@ public partial class MainWindow : Window
             Interlocked.Exchange(ref _passwordFailures, 0);
             Log("Password-authorized, explicitly trusted Controller connected while the Host app is visible.");
             return new(request.ViewScreen, request.ControlInput && _settings.AllowControl && _settings.PasswordControl,
-                request.FileAccess && _settings.AllowFiles && _settings.PasswordFiles && !string.IsNullOrEmpty(_settings.SharedFolder), false);
+                request.FileAccess && _settings.AllowFiles && _settings.PasswordFiles, false);
         }
         return await Dispatcher.InvokeAsync(() => PromptAsync(request, token)).Task.Unwrap();
     }
@@ -247,7 +247,7 @@ public partial class MainWindow : Window
         var close = new Button { Content = "×", Padding = new Thickness(5, 0, 5, 0), Margin = new Thickness(10, 0, 0, 0), Background = Brushes.Transparent, ToolTip = "Disconnect this device" };
         header.Children.Add(close);
         var tab = new TabItem { Header = header, Content = view };
-        var host = new HostSessionRuntime(session, _settings, operation => ConfirmSensitiveAsync(operation), status => view.SetStatus(status));
+        var host = new HostSessionRuntime(session, _settings, operation => ConfirmSensitiveAsync(session, operation), status => view.SetStatus(status));
         view.ActionReported = Log;
         view.ShareLocalFolder = folder => { host.ShareFolder(folder); return Task.CompletedTask; };
         view.StopLocalSharing = host.StopSharing;
@@ -275,26 +275,27 @@ public partial class MainWindow : Window
         ConnectionStatus.Text = context.Session.CloseReason; Log(context.Session.CloseReason);
     }
     private void UpdateSessionCount() => SessionCountText.Text = $"{_sessions.Values.Count(s => s.Owned)} outgoing · {_sessions.Values.Count(s => !s.Owned)} incoming";
-    private async Task<bool> ConfirmSensitiveAsync(Operation operation)
+    private async Task<bool> ConfirmSensitiveAsync(SecureSession session, Operation operation)
     {
         return await Dispatcher.InvokeAsync(() =>
         {
-            if (_closing) return false;
+            if (_closing || session.Completion.IsCompleted) return false;
             if (operation == Operation.RequestInputLock)
                 return MessageBox.Show(this, "The Controller requests blocking your PHYSICAL MOUSE AND KEYBOARD for at most 30 seconds. Windows may require elevation. Ctrl+Alt+Del releases the block immediately; disconnect/process exit also releases it.\n\nAllow this one temporary block?", "RemoteDesk · local input consent", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
             if (_restartPending) return false;
             if (ElevationLauncher.IsElevated()) { ErrorText.Text = "RemoteDesk is already running as administrator."; return false; }
             bool accepted = MessageBox.Show(this, "The Controller requests restarting RemoteDesk as administrator. All of this app's sessions will close. You must approve the NORMAL WINDOWS UAC prompt yourself. A different Windows account can have a different device ID.\n\nRestart with UAC now?", "RemoteDesk · admin restart", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
-            if (accepted) { _restartPending = true; _ = RestartElevatedAsync(); } return accepted;
+            accepted &= !session.Completion.IsCompleted;
+            if (accepted) { _restartPending = true; _ = RestartElevatedAsync(session); } return accepted;
         });
     }
-    private async Task RestartElevatedAsync()
+    private async Task RestartElevatedAsync(SecureSession session)
     {
         bool wasAvailable = ListenCheck.IsChecked == true;
         await Task.Delay(1500); // Let the authenticated reply leave before closing the Host channel.
         try
         {
-            if (_closing) return;
+            if (_closing || session.Completion.IsCompleted) return;
             await StopAvailabilityAsync();
             string executable = Environment.ProcessPath ?? throw new IOException("Cannot find the executable.");
             bool started = await Task.Run(() => ElevationLauncher.Start(executable, AppContext.BaseDirectory));

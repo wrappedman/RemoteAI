@@ -1,18 +1,18 @@
-# RemoteDesk 0.3 — quick start
+# RemoteDesk 0.3.1 — quick start
 
-Extract `RemoteDesk-win-x64-portable.zip` and run the extracted `RemoteDesk.exe`; keep all files together. Runtime included. Or run the EXE in the repository run folder with its companion DLLs/JSON and .NET 10 Desktop Runtime x64 installed. **Close old instances and update BOTH endpoints to 0.3.**
+Extract `RemoteDesk-win-x64-portable.zip` and run the extracted `RemoteDesk.exe`; keep all files together. Runtime included. Or run the EXE in the repository run folder with its companion DLLs/JSON and .NET 10 Desktop Runtime x64 installed. **Close old instances and update BOTH endpoints to 0.3.1.**
 
 ## Connect and control
 
 - Enter the destination's 12-digit ID on the SAME trusted Private LAN. IP entry is not required; manual full-pin setup remains in the advanced expander.
-- Select Control / Files / Effects to request them. On the Host, approve screen viewing and separately check the permissions you want to grant. A grey control/file button means permission was not granted or Host policy/shared folder is not configured.
+- Select Control / Files / Effects to request them. On the Host, approve screen viewing and separately check the permissions you want to grant; disabled boxes include a visible reason. A grey control/file button means permission was not granted or Host policy/shared folder is not configured.
 - A new full-size tab opens for each device. Up to 8 outgoing tabs, independently closable. One incoming Controller per Host.
 - Target FPS: 5, 15, 20, 24, 30. Fast = 960px / JPEG 40; Balanced = 1440px / 55; Sharp = 1920px / 80. Actual receive FPS is in the status strip; 30 is not guaranteed. Inactive tabs reduce to 2 FPS.
 - Display: Fit / Actual size (scrollable) / Stretch. F11 enters/exits full screen; Esc exits full screen. **Ctrl+Alt+F12 releases remote input.** Click the remote image to focus keyboard control. Focus/tab loss releases remote-held keys.
 
 ## Settings and permissions
 
-Settings configures the incoming TCP port (1024–65535), startup availability, default FPS/width, permitted grants, shared folder and password policy. Saving restarts the incoming listener and disconnects its current Host session; outgoing tabs remain independent. UDP discovery stays on 45832.
+Settings configures the incoming TCP port (1024–65535), startup availability, default FPS/width, permitted grants, shared folder and password policy. Same-port saves update policy/folder without disconnecting; only a changed TCP port restarts incoming availability. Existing grants are unchanged. UDP discovery stays on 45832.
 
 **Shared folder / files:** choose a dedicated existing folder on the Host, enable file grants, then grant Files in the incoming approval. The Controller's Files panel lists/downloads that root and subfolders; Upload places files in the root. No SMB share or mapped drive is created. No symbolic links, path traversal, execution, overwrite or access outside the chosen root. Entire drives, settings/cache/profile ancestors are not suitable shared roots. Max 8 GiB/file; max 16 partial uploads / 16 GiB cache. Partial uploads are in `%LOCALAPPDATA%\RemoteDesk\Transfers`; use the Settings button to inspect/clean them locally. Reserved `.remotedesk-*` destination staging files are not exposed in the virtual browser.
 
@@ -39,3 +39,15 @@ The app never elevates or changes firewall rules silently. No Public port forwar
 ## Remaining limits
 
 Primary display, GDI/JPEG over TLS/TCP, not H.264/WebRTC. Protected/locked/UAC/HDR desktops can be black/stale or unavailable. Standard SendInput cannot cross Windows UIPI/UAC/session boundaries; some OS hotkeys stay local and remote Ctrl+Alt+Del is not supported. No clipboard sync, audio, multi-monitor selector, Internet relay, Windows-login control, background service, automatic reconnect/job scheduling or actual SMB drive mapping. Builds are unsigned. Physical two-PC FPS/latency, DPI/GPU, UAC and input-block recovery acceptance remain pending; see BUILD-INFO.md and repository docs.
+
+## 0.3.1 corrections — update both endpoints
+
+Protocol v4 is required; 0.3.1 endpoints intentionally cannot connect to 0.3.1. The window/taskbar/EXE now use a multi-size RemoteDesk icon. Connection center uses available window width and the remaining height for activity instead of a fixed 760px layout.
+
+**Which folder belongs to whom?** `Remote files` always shows the OTHER device's selected folder and its actual path. The Host's approved configured folder is served on connection. To expose a Controller-side folder back to that Host, choose `Share my folder…` on the Controller's session; on the Host's incoming tab click `Remote files` / `Refresh`. Either side can `Stop sharing`. This is explicit per-session sharing, not automatic exposure of every Controller's saved folder. File exchange must be granted, but a preselected root is no longer required to check the Files approval box.
+
+**Why is a grant grey?** The approval now states whether the Controller did not request it or your local policy disables it. Animations is requested by default but never automatically granted. Use `Review permission policies`, enable the policy and Save, then return and check the grant. Same-port policy saves keep the pending request open; allowance time is 120 seconds. Existing permission grants are not silently upgraded—reconnect if a permission was not granted.
+
+**Admin requests:** on the Host, enable `Permit requests to restart with UAC elevation` in Settings and Save (no reconnect for that policy change). Grant Control when approving. The Controller's request waits for a fresh Host confirmation and a normal UAC prompt ON THE HOST. Already-elevated Hosts report that no restart is needed. Denial/failure is persistent below the picture and in Recent activity, not overwritten by frame counters. If UAC is cancelled, availability is restored or a port-conflict explanation is shown. No UAC bypass.
+
+**Animations:** the checkbox reflects the acknowledged Host state. Failure rolls it back with a persistent reason. Both the connection request and Host approval must include Animations; a Host policy denial cannot be bypassed. The app restores original animation flags on normal cleanup.

@@ -234,7 +234,7 @@ public partial class SessionView : UserControl, IAsyncDisposable
     private async Task SpecialAsync(Operation op)
     {
         SetStatus(op == Operation.RequestAdmin ? "Admin request sent — waiting for the Host’s local confirmation. The normal UAC prompt appears on the HOST, not here." : "Input-block request sent — waiting for fresh Host consent.");
-        try { await Session.RequestAsync(RemoteCommand.Create(op), _lifetime); SetStatus(op == Operation.RequestAdmin ? "Host accepted UAC restart; reconnect after their approval." : "Host accepted physical input blocking (up to 30 seconds; Ctrl+Alt+Del releases locally)."); }
+        try { var reply = await Session.RequestAsync(RemoteCommand.Create(op), _lifetime); SetStatus(reply.Path == "already-elevated" ? "The Host is already running as administrator. No restart or extra UAC prompt is needed." : op == Operation.RequestAdmin ? "Host accepted UAC restart; reconnect after their approval." : "Host accepted physical input blocking (up to 30 seconds; Ctrl+Alt+Del releases locally)."); }
         catch (Exception ex) when (ex is IOException or OperationCanceledException or UnauthorizedAccessException) { SetStatus(ex.Message); }
     }
     private async void Files_Click(object sender, RoutedEventArgs e)

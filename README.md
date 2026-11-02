@@ -1,10 +1,10 @@
-# RemoteDesk 0.3 — remote workspace
+# RemoteDesk 0.3.1 — remote workspace
 
 English Windows WPF client with numeric LAN discovery, per-device tabs, explicit permissions, mouse/keyboard control and resumable file transfer. Design follows the supplied `01.jpg`; **Connection center is separate from full-size session tabs**.
 
 ## Run
 
-Extract `run/RemoteDesk-win-x64-portable.zip` and launch `RemoteDesk.exe`. Runtime included. Update **both endpoints** to 0.3 / protocol v3; older builds intentionally fail closed. Alternatively run the framework-dependent EXE with all companions and .NET 10 Desktop Runtime x64.
+Extract `run/RemoteDesk-win-x64-portable.zip` and launch `RemoteDesk.exe`. Runtime included. Update **both endpoints** to 0.3.1 / protocol v4; older builds intentionally fail closed. Alternatively run the framework-dependent EXE with all companions and .NET 10 Desktop Runtime x64.
 
 1. Open the app on both PCs on a trusted private LAN. Enter the Host's 12-digit ID in Connection center.
 2. Choose requested Control / Files / Effects permissions. Host explicitly chooses which to grant; screen approval alone never grants input or files.

@@ -21,11 +21,12 @@ public sealed class HostSessionRuntime : IDisposable
     public string? SharedFolder { get; private set; }
     private readonly Func<Operation, Task<bool>> _confirm;
     private readonly Action<string> _status;
+    private readonly Func<bool> _isElevated;
     private StreamProfile _profile;
     private bool _closed;
-    public HostSessionRuntime(SecureSession session, AppSettings settings, Func<Operation, Task<bool>> confirm, Action<string> status)
+    public HostSessionRuntime(SecureSession session, AppSettings settings, Func<Operation, Task<bool>> confirm, Action<string> status, Func<bool>? isElevated = null)
     {
-        _session = session; _settings = settings; _confirm = confirm; _status = status;
+        _session = session; _settings = settings; _confirm = confirm; _status = status; _isElevated = isElevated ?? ElevationLauncher.IsElevated;
         _profile = new(settings.DefaultFps, settings.DefaultWidth);
         if (session.IsHost && session.Permissions.ControlInput)
         {
@@ -86,6 +87,7 @@ public sealed class HostSessionRuntime : IDisposable
                 return blocked ? command.Reply() : command.Fail("Windows refused physical-input blocking (elevation may be required), or a block is already active.");
             case Operation.RequestAdmin:
                 if (!_settings.AllowAdminRequests) return command.Fail("Host Settings: enable admin restart requests, then retry. A local confirmation and the normal Windows UAC prompt are required.");
+                if (_isElevated()) return command.Reply() with { Path = "already-elevated" };
                 return await _confirm(command.Operation) ? command.Reply() : command.Fail("Host declined the UAC restart request.");
             default:
                 var files = Volatile.Read(ref _files);

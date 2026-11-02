@@ -1,4 +1,4 @@
-# Roadmap after workspace 0.3
+# Roadmap after workspace 0.3.1
 
 Implemented in this branch: independent Controller session tabs (8 outgoing/1 incoming), compact connection center/settings, numeric LAN lookup, configured port/policy, binary paced JPEG/background rendering and profiles, consent-gated SendInput, virtual shared folder and resumable hashed transfers, trusted-key/password app-open approval, explicit UAC restart request and short local-confirmed physical-input-block request.
 

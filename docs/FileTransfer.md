@@ -1,6 +1,6 @@
 # Virtual shared folder and resumable files
 
-Host selects an existing dedicated directory in Settings, enables file policy and grants Files to a session. The Controller browses it in the session tab. This is not Windows SMB, a UNC share, a mapped drive or remote execution. Uploads target the root; downloads can browse subdirectories. No remote delete/rename/overwrite action is provided.
+Host can select an existing dedicated directory in Settings, enable file policy and grant Files to a session. File exchange may also be granted without a root; no local data is exposed until a root is selected. The Controller browses it in Remote files. With Files granted, either endpoint can explicitly choose Share my folder in its session tab; the opposite endpoint opens Remote files / Refresh. A Controller’s configured root is never silently exposed back to a Host. Stop sharing revokes further requests. The panel identifies the actual remote root, not the local folder. This is not Windows SMB, a UNC share, a mapped drive or remote execution. Uploads target the root; downloads can browse subdirectories. No remote delete/rename/overwrite action is provided.
 
 ## Sandbox
 
