@@ -1,7 +1,7 @@
 # Verified Windows build
 
-Source commit: 157666e3b0be642f8190320f5bee110f95f50577
-Workflow: https://github.com/wrappedman/RemoteAI/actions/runs/41406272697
+Source commit: 872f0769c3002b93f0a7b90957f60f8dd93afe45
+Workflow: https://github.com/wrappedman/RemoteAI/actions/runs/41406997546
 Runner: windows-latest, Windows x64, .NET 10 SDK.
 Checks: Release solution build, Core/Protocol/Security integration suites, Windows CNG persistence and non-exportability, WPF startup, multi-tab simultaneous sessions, real GDI capture/binary media/background decoding/fullscreen, DPAPI/PBKDF2 password verifier, input-worker cleanup; TLS input permission and resumable upload/download SHA-256/sandbox tests.
 Manual two-PC LAN, DPI and resource acceptance: pending (see docs/Acceptance.md).
