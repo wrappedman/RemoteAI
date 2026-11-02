@@ -17,6 +17,12 @@ public partial class SessionView : UserControl, IAsyncDisposable
     public SecureSession Session { get; }
     public Action<bool>? FullScreen { get; set; }
     public Func<Task>? CloseRequested { get; set; }
+    public Func<string, Task>? ShareLocalFolder { get; set; }
+    public Action? StopLocalSharing { get; set; }
+    public Func<string>? ConfiguredFolder { get; set; }
+    public Action<string>? ActionReported { get; set; }
+    private bool _appliedAnimations, _restoringAnimation;
+    private readonly SemaphoreSlim _profileGate = new(1, 1);
     private readonly Channel<byte[]> _frames = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropOldest });
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _decodeTask;
@@ -36,9 +42,13 @@ public partial class SessionView : UserControl, IAsyncDisposable
         Session = session; _lifetime = _stop.Token; InitializeComponent();
         int[] rates = [5, 15, 20, 24, 30]; FpsBox.SelectedIndex = Math.Max(0, Array.IndexOf(rates, defaultFps));
         QualityBox.SelectedIndex = defaultWidth <= 960 ? 0 : defaultWidth >= 1920 ? 2 : 1;
-        FilesButton.IsEnabled = !session.IsHost && session.Permissions.FileAccess;
+        FilesButton.IsEnabled = ShareFolderButton.IsEnabled = session.Permissions.FileAccess;
+        FilesButton.ToolTip = ShareFolderButton.ToolTip = session.Permissions.FileAccess ? "Browse the other device’s explicitly shared folder, or choose which of your folders to share back." : "Files was not granted. Reconnect with Files requested and check file exchange on the Host approval.";
+        PermissionsText.Text = $"Granted · Screen: {session.Permissions.ViewScreen} · Control: {session.Permissions.ControlInput} · Files: {session.Permissions.FileAccess} · Animations: {session.Permissions.DesktopEffects}";
         AdminButton.IsEnabled = LockButton.IsEnabled = ControlCheck.IsEnabled = !session.IsHost && session.Permissions.ControlInput;
         AnimationsCheck.IsEnabled = !session.IsHost && session.Permissions.DesktopEffects;
+        AnimationsCheck.ToolTip = session.IsHost ? "This option is controlled by the Controller." : session.Permissions.DesktopEffects ? "Temporarily disable Host desktop animations; restores on disconnect." : "Animations was not granted. Select Animations before connecting; the Host must enable its policy and check the animation grant.";
+        AdminButton.ToolTip = LockButton.ToolTip = session.IsHost ? "Requests are sent from the Controller." : session.Permissions.ControlInput ? "Requires enabled Host policy and fresh local confirmation. Any refusal is shown below and in Recent activity." : "Control was not granted. Reconnect and grant Control on the Host.";
         ControlCheck.IsChecked = !session.IsHost && session.Permissions.ControlInput;
         FpsBox.IsEnabled = QualityBox.IsEnabled = DisplayBox.IsEnabled = session.CanReceiveScreen;
         if (session.IsHost)
@@ -55,7 +65,26 @@ public partial class SessionView : UserControl, IAsyncDisposable
         };
         _stale.Start(); _ready = true;
     }
-    public void SetStatus(string status) => _ = Dispatcher.BeginInvoke(new Action(() => ViewerStatus.Text = status));
+    public void SetStatus(string status) => _ = Dispatcher.BeginInvoke(new Action(() => { ActionStatus.Text = status; ActionReported?.Invoke(status); }));
+    public void SetLocalFolder(string? folder)
+    {
+        LocalFolderText.Text = folder is null ? "Your folder is NOT shared with this device. Choose Share my folder to expose a selected folder only." : "You are sharing: " + folder;
+        StopSharingButton.Visibility = folder is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+    public async Task ShareFolderAsync(string folder)
+    {
+        if (!Session.Permissions.FileAccess || ShareLocalFolder is null) throw new UnauthorizedAccessException("File exchange was not granted.");
+        await ShareLocalFolder(folder); SetLocalFolder(folder); SetStatus("Folder shared with this device. On the other device, open Remote files and Refresh.");
+    }
+    private async void ShareFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog { Title = "Share this folder with the connected device (read and new uploads)" };
+        string? configured = ConfiguredFolder?.Invoke(); if (!string.IsNullOrEmpty(configured) && Directory.Exists(configured)) dialog.InitialDirectory = configured;
+        if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
+        try { await ShareFolderAsync(dialog.FolderName); }
+        catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException) { SetStatus(ex.Message); }
+    }
+    private void StopSharing_Click(object sender, RoutedEventArgs e) { StopLocalSharing?.Invoke(); SetLocalFolder(null); SetStatus("Local folder sharing stopped. Already accepted disk operations may finish; future requests are refused."); }
     private void QueueFrame(byte[] jpeg) => _frames.Writer.TryWrite(jpeg);
     private void ScreenUnavailable() => _ = Dispatcher.BeginInvoke(new Action(() =>
     {
@@ -91,20 +120,33 @@ public partial class SessionView : UserControl, IAsyncDisposable
         catch (Exception ex) when (ex is IOException or InvalidOperationException or NotSupportedException or ArgumentException or FormatException)
         { SetStatus("Screen decoding failed; session closed."); await Session.DisconnectAsync(); }
     }
-    private async Task OptionsAsync()
+    private async Task<bool> OptionsAsync()
     {
-        if (!_ready || !Session.CanReceiveScreen || _stop.IsCancellationRequested) return;
+        if (!_ready || !Session.CanReceiveScreen || _stop.IsCancellationRequested) return false;
+        bool entered = false;
         try
         {
+            await _profileGate.WaitAsync(_lifetime); entered = true;
             int fps = int.Parse(((ComboBoxItem)FpsBox.SelectedItem).Content.ToString()!);
             int width = QualityBox.SelectedIndex switch { 0 => 960, 2 => 1920, _ => 1440 };
             int quality = QualityBox.SelectedIndex switch { 0 => 40, 2 => 80, _ => 55 };
-            await Session.RequestAsync(RemoteCommand.Create(Operation.SetStream) with { Fps = _visible ? fps : 2, Width = width, Quality = quality, DisableAnimations = AnimationsCheck.IsChecked == true }, _lifetime);
+            bool animations = AnimationsCheck.IsChecked == true;
+            await Session.RequestAsync(RemoteCommand.Create(Operation.SetStream) with { Fps = _visible ? fps : 2, Width = width, Quality = quality, DisableAnimations = animations }, _lifetime);
+            _appliedAnimations = animations; return true;
         }
-        catch (Exception ex) when (ex is IOException or OperationCanceledException or UnauthorizedAccessException) { if (!_stop.IsCancellationRequested) SetStatus(ex.Message); }
+        catch (Exception ex) when (ex is IOException or OperationCanceledException or UnauthorizedAccessException)
+        {
+            _restoringAnimation = true; AnimationsCheck.IsChecked = _appliedAnimations; _restoringAnimation = false;
+            if (!_stop.IsCancellationRequested) SetStatus(ex.Message); return false;
+        }
+        finally { if (entered) _profileGate.Release(); }
     }
     private async void Profile_Changed(object sender, SelectionChangedEventArgs e) => await OptionsAsync();
-    private async void Animations_Changed(object sender, RoutedEventArgs e) => await OptionsAsync();
+    private async void Animations_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!_ready || _restoringAnimation) return;
+        if (await OptionsAsync()) SetStatus(_appliedAnimations ? "Animations disabled on the Host for this session." : "Host animation preferences restored.");
+    }
     private void Display_Changed(object sender, SelectionChangedEventArgs e) { if (_ready) ApplyDisplay(); }
     private void ApplyDisplay()
     {
@@ -191,18 +233,27 @@ public partial class SessionView : UserControl, IAsyncDisposable
     private async void Lock_Click(object sender, RoutedEventArgs e) => await SpecialAsync(Operation.RequestInputLock);
     private async Task SpecialAsync(Operation op)
     {
+        SetStatus(op == Operation.RequestAdmin ? "Admin request sent — waiting for the Host’s local confirmation. The normal UAC prompt appears on the HOST, not here." : "Input-block request sent — waiting for fresh Host consent.");
         try { await Session.RequestAsync(RemoteCommand.Create(op), _lifetime); SetStatus(op == Operation.RequestAdmin ? "Host accepted UAC restart; reconnect after their approval." : "Host accepted physical input blocking (up to 30 seconds; Ctrl+Alt+Del releases locally)."); }
         catch (Exception ex) when (ex is IOException or OperationCanceledException or UnauthorizedAccessException) { SetStatus(ex.Message); }
     }
     private async void Files_Click(object sender, RoutedEventArgs e)
     {
-        FilesColumn.Width = FilesColumn.Width.Value > 0 ? new GridLength(0) : new GridLength(310);
+        FilesColumn.Width = FilesColumn.Width.Value > 0 ? new GridLength(0) : new GridLength(360);
         if (FilesColumn.Width.Value > 0) await ListAsync();
     }
     private async Task ListAsync()
     {
-        try { var reply = await Session.RequestAsync(RemoteCommand.Create(Operation.ListFiles, _directory), _lifetime); FileList.ItemsSource = reply.Entries ?? []; FolderPath.Text = "/" + _directory; }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException) { TransferText.Text = ex.Message; }
+        try
+        {
+            RemoteFolderInfo.Text = "Checking the other device’s selected folder…";
+            var info = await Session.RequestAsync(RemoteCommand.Create(Operation.ShareInfo), _lifetime);
+            var reply = await Session.RequestAsync(RemoteCommand.Create(Operation.ListFiles, _directory), _lifetime);
+            FileList.ItemsSource = reply.Entries ?? []; FolderPath.Text = "/" + _directory;
+            RemoteFolderInfo.Text = "Other device shares: " + info.Path;
+            TransferText.Text = $"{reply.Entries?.Length ?? 0} entries. Double-click a folder. Upload writes to that device’s shared root; Download saves locally.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException) { FileList.ItemsSource = null; RemoteFolderInfo.Text = "No accessible remote folder"; TransferText.Text = ex.Message; SetStatus(ex.Message); }
     }
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await ListAsync();
     private async void Up_Click(object sender, RoutedEventArgs e) { _directory = _directory.Contains('/') ? _directory[.._directory.LastIndexOf('/')] : ""; await ListAsync(); }
@@ -227,7 +278,7 @@ public partial class SessionView : UserControl, IAsyncDisposable
     }
     private async void Upload_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFileDialog { Title = "Upload to the Host shared-folder root (no overwrite)" };
+        var dialog = new OpenFileDialog { Title = "Upload to the other device’s shared-folder root (no overwrite)" };
         if (dialog.ShowDialog(Window.GetWindow(this)) == true) await TransferAsync(token => FileTransferClient.UploadAsync(Session, dialog.FileName, TransferProgress(), token));
     }
     private async void Download_Click(object sender, RoutedEventArgs e)

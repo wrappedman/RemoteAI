@@ -10,7 +10,7 @@ public sealed class AppSettings
     public bool AvailableOnStart { get; set; } = true;
     public bool AllowControl { get; set; } = true;
     public bool AllowFiles { get; set; } = true;
-    public bool AllowEffects { get; set; }
+    public bool AllowEffects { get; set; } = true;
     public bool AllowAdminRequests { get; set; }
     public bool AllowInputLock { get; set; }
     public bool PasswordAccess { get; set; }

@@ -77,7 +77,7 @@ public sealed class SecureSession : IAsyncDisposable
             }, connectTimeout.Token).ConfigureAwait(false);
             state(SessionState.WaitingForApproval);
             using var approvalTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-            approvalTimeout.CancelAfter(TimeSpan.FromSeconds(60));
+            approvalTimeout.CancelAfter(TimeSpan.FromSeconds(135));
             var id = Guid.NewGuid();
             string code = NumericDeviceId.VerificationCode(id, identity.DeviceId, expectedHostId);
             verificationCode?.Invoke(code);
@@ -123,7 +123,7 @@ public sealed class SecureSession : IAsyncDisposable
                 throw new InvalidDataException("Request identity does not match TLS identity.");
             state(SessionState.WaitingForApproval);
             using var approvalTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-            approvalTimeout.CancelAfter(TimeSpan.FromSeconds(45));
+            approvalTimeout.CancelAfter(TimeSpan.FromSeconds(120));
             SessionGrant? grant;
             try
             {
@@ -178,10 +178,10 @@ public sealed class SecureSession : IAsyncDisposable
                         ScreenUnavailable?.Invoke(); break;
                     case MessageType.Input when IsHost && Permissions.ControlInput:
                         InputReceived?.Invoke(message.Payload.Input!); break;
-                    case MessageType.Command when IsHost:
+                    case MessageType.Command:
                         if (!_commands.Writer.TryWrite(message.Payload.Command!)) throw new InvalidDataException("Command queue full.");
                         break;
-                    case MessageType.Reply when !IsHost:
+                    case MessageType.Reply:
                         var reply = message.Payload.Command!;
                         if (_pending.TryRemove(reply.Id, out var promise)) promise.TrySetResult(reply);
                         break;
@@ -205,6 +205,8 @@ public sealed class SecureSession : IAsyncDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex) when (ex is InvalidDataException or IOException or SocketException or ObjectDisposedException) { Close("Connection lost"); }
     }
+    private static bool IsFileOperation(Operation operation) => operation is Operation.ListFiles or Operation.ReadInfo or Operation.ReadChunk
+        or Operation.WriteBegin or Operation.WriteChunk or Operation.WriteComplete or Operation.ShareInfo;
     private bool Allowed(Operation operation) => operation switch
     {
         Operation.SetStream => Permissions.ViewScreen,
@@ -220,8 +222,8 @@ public sealed class SecureSession : IAsyncDisposable
                 RemoteCommand response;
                 try
                 {
-                    response = !Allowed(command.Operation) ? command.Fail("Permission denied by Host.")
-                        : CommandHandler is null ? command.Fail("This Host has no handler for this operation.")
+                    response = !Allowed(command.Operation) || (!IsHost && !IsFileOperation(command.Operation)) ? command.Fail("Permission denied by peer.")
+                        : CommandHandler is null ? command.Fail("The peer has not shared a folder for this session.")
                         : await CommandHandler(command, _stop.Token).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or System.Text.Json.JsonException)
@@ -238,7 +240,7 @@ public sealed class SecureSession : IAsyncDisposable
     }
     public async Task<RemoteCommand> RequestAsync(RemoteCommand command, CancellationToken token)
     {
-        if (IsHost || !Allowed(command.Operation)) throw new UnauthorizedAccessException("Operation was not granted.");
+        if (!Allowed(command.Operation) || (IsHost && !IsFileOperation(command.Operation))) throw new UnauthorizedAccessException("Operation was not granted.");
         if (_pending.Count >= 16) throw new IOException("Too many pending requests.");
         var promise = new TaskCompletionSource<RemoteCommand>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!_pending.TryAdd(command.Id, promise)) throw new InvalidOperationException("Duplicate request.");

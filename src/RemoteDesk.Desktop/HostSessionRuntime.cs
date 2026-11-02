@@ -12,11 +12,13 @@ public sealed record StreamProfile(int Fps = 20, int Width = 1440, int Quality =
 public sealed class HostSessionRuntime : IDisposable
 {
     private readonly SecureSession _session;
-    private readonly AppSettings _settings;
+    private AppSettings _settings;
     private readonly InputController? _input;
     private readonly DesktopEffects _effects = new();
     private readonly object _effectsGate = new();
-    private readonly SharedFolderService? _files;
+    private SharedFolderService? _files;
+    private bool _sessionFolder;
+    public string? SharedFolder { get; private set; }
     private readonly Func<Operation, Task<bool>> _confirm;
     private readonly Action<string> _status;
     private StreamProfile _profile;
@@ -25,25 +27,48 @@ public sealed class HostSessionRuntime : IDisposable
     {
         _session = session; _settings = settings; _confirm = confirm; _status = status;
         _profile = new(settings.DefaultFps, settings.DefaultWidth);
-        if (session.Permissions.ControlInput)
+        if (session.IsHost && session.Permissions.ControlInput)
         {
             _input = new(); _input.Status += status; session.InputReceived += _input.Post;
         }
-        if (session.Permissions.FileAccess && !string.IsNullOrEmpty(settings.SharedFolder))
-        {
-            try { _files = new(settings.SharedFolder, AppSettings.TransferCache, session.PeerId); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _status("Shared folder unavailable; no file access is served."); }
-        }
+        // The Host's local approval authorizes its configured root. A Controller must
+        // explicitly select Share my folder before exposing any local data back to the Host.
+        if (session.IsHost) RefreshConfiguredFolder();
         session.CommandHandler = HandleAsync;
         if (session.CanSendScreen) session.StartScreenProducer(ProduceAsync);
     }
+    public void UpdateSettings(AppSettings settings)
+    {
+        Volatile.Write(ref _settings, settings);
+        if (!settings.AllowEffects) lock (_effectsGate) _effects.SetDisabled(false);
+        if (!settings.AllowFiles) StopSharing();
+        else if (_session.IsHost && !_sessionFolder) RefreshConfiguredFolder();
+    }
+    private void RefreshConfiguredFolder()
+    {
+        if (!_session.Permissions.FileAccess || !_settings.AllowFiles) return;
+        if (string.IsNullOrEmpty(_settings.SharedFolder)) { Volatile.Write(ref _files, null); SharedFolder = null; return; }
+        try { ShareFolder(_settings.SharedFolder, false); }
+        catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)
+        { Volatile.Write(ref _files, null); SharedFolder = null; _status("Local shared folder unavailable. Choose Share my folder to select an accessible folder."); }
+    }
+    public void ShareFolder(string folder, bool sessionOnly = true)
+    {
+        if (_closed || !_session.Permissions.FileAccess || !_settings.AllowFiles)
+            throw new UnauthorizedAccessException("File exchange was not granted or local file policy is disabled. Enable Files and reconnect with that permission.");
+        // Use the same root restrictions for Settings and session-specific sharing.
+        new AppSettings { SharedFolder = folder }.Validate();
+        var files = new SharedFolderService(folder, AppSettings.TransferCache, _session.PeerId);
+        Volatile.Write(ref _files, files); SharedFolder = Path.GetFullPath(folder); _sessionFolder = sessionOnly;
+    }
+    public void StopSharing() { Volatile.Write(ref _files, null); SharedFolder = null; _sessionFolder = true; }
     private async Task<RemoteCommand> HandleAsync(RemoteCommand command, CancellationToken token)
     {
         if (_closed) return command.Fail("Session ended.");
         switch (command.Operation)
         {
             case Operation.SetStream:
-                if (command.DisableAnimations && !_session.Permissions.DesktopEffects) return command.Fail("Desktop animation permission was not granted.");
+                if (command.DisableAnimations && (!_session.Permissions.DesktopEffects || !_settings.AllowEffects)) return command.Fail("Animations are not permitted. Enable animations in Host Settings and grant Animations during approval; reconnect if not granted.");
                 lock (_effectsGate)
                 {
                     if (_closed) return command.Fail("Session ended.");
@@ -53,17 +78,18 @@ public sealed class HostSessionRuntime : IDisposable
                 }
                 return command.Reply();
             case Operation.RequestInputLock:
-                if (!_settings.AllowInputLock || _input is null) return command.Fail("Input blocking is disabled in Host settings.");
+                if (!_settings.AllowInputLock || _input is null) return command.Fail("Host Settings: enable physical-input-block requests and grant Control, then retry. Fresh local consent is always required.");
                 if (!await _confirm(command.Operation)) return command.Fail("Host declined physical-input blocking.");
                 bool blocked;
                 try { blocked = await _input.BlockPhysicalInputFor30SecondsAsync(); }
                 catch (TimeoutException) { return command.Fail("Input worker did not respond; no block confirmation available."); }
                 return blocked ? command.Reply() : command.Fail("Windows refused physical-input blocking (elevation may be required), or a block is already active.");
             case Operation.RequestAdmin:
-                if (!_settings.AllowAdminRequests) return command.Fail("Admin restart requests are disabled in Host settings.");
+                if (!_settings.AllowAdminRequests) return command.Fail("Host Settings: enable admin restart requests, then retry. A local confirmation and the normal Windows UAC prompt are required.");
                 return await _confirm(command.Operation) ? command.Reply() : command.Fail("Host declined the UAC restart request.");
             default:
-                return _files is null ? command.Fail("Host has not configured an accessible shared folder.") : await _files.HandleAsync(command, token);
+                var files = Volatile.Read(ref _files);
+                return files is null ? command.Fail("No folder is shared by the other device. On that device, choose Share my folder in this session, then Refresh here.") : await files.HandleAsync(command, token);
         }
     }
     private async Task ProduceAsync(CancellationToken token)

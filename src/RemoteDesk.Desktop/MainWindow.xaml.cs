@@ -17,6 +17,7 @@ using RemoteDesk.Protocol;
 using RemoteDesk.Security;
 using RemoteDesk.Transport;
 using RemoteDesk.Windows;
+using Microsoft.Win32;
 namespace RemoteDesk.Desktop;
 
 public sealed record SavedDevice(string Name, string Code, string? Fingerprint = null);
@@ -38,6 +39,7 @@ public partial class MainWindow : Window
     private int _passwordFailures;
     private long _passwordBlockedUntil;
     private WindowState _oldWindowState;
+    private bool _restartPending;
     private readonly string _devicesPath = Path.Combine(AppSettings.DataDirectory, "devices-v2.json");
     public MainWindow()
     {
@@ -127,15 +129,42 @@ public partial class MainWindow : Window
     private async Task<SessionGrant?> PromptAsync(ApprovalRequest request, CancellationToken token)
     {
         _approval = new(TaskCreationOptions.RunContinuationsAsynchronously); _approvalRequest = request;
-        ApprovalDetails.Text = $"Device {NumericDeviceId.Format(NumericDeviceId.FromFingerprint(request.DeviceId))}\nName (unverified): {request.DisplayName}\nSession reference: {request.VerificationCode}\nFull Controller key:\n{request.DeviceId}\nExpires in 45 seconds.";
-        GrantControlCheck.IsEnabled = request.ControlInput && _settings.AllowControl;
-        GrantFilesCheck.IsEnabled = request.FileAccess && _settings.AllowFiles && !string.IsNullOrEmpty(_settings.SharedFolder);
-        GrantEffectsCheck.IsEnabled = request.DesktopEffects && _settings.AllowEffects;
+        ApprovalDetails.Text = $"Device {NumericDeviceId.Format(NumericDeviceId.FromFingerprint(request.DeviceId))}\nName (unverified): {request.DisplayName}\nSession reference: {request.VerificationCode}\nFull Controller key:\n{request.DeviceId}\nExpires in 120 seconds.";
+        RefreshApprovalPermissions();
         GrantControlCheck.IsChecked = GrantFilesCheck.IsChecked = GrantEffectsCheck.IsChecked = TrustControllerCheck.IsChecked = false;
         ApprovalPanel.Visibility = Visibility.Visible; Workspace.SelectedItem = ConnectionCenterTab; Activate();
         Post(() => ApprovalPanel.BringIntoView());
         try { return await _approval.Task.WaitAsync(token); }
         finally { _approval = null; _approvalRequest = null; ApprovalPanel.Visibility = Visibility.Collapsed; }
+    }
+    private void RefreshApprovalPermissions()
+    {
+        if (_approvalRequest is not { } request) return;
+        GrantControlCheck.IsEnabled = request.ControlInput && _settings.AllowControl;
+        GrantFilesCheck.IsEnabled = request.FileAccess && _settings.AllowFiles;
+        GrantEffectsCheck.IsEnabled = request.DesktopEffects && _settings.AllowEffects;
+        var hints = new List<string>();
+        void Explain(CheckBox box, bool requested, bool policy, string name)
+        {
+            string reason = !requested ? $"{name} was not requested. The Controller must select it before reconnecting."
+                : !policy ? $"{name} is disabled by your local policy. Open Review permission policies, enable it and Save; return here to approve." : $"You may grant {name} to this session only.";
+            box.ToolTip = reason;
+            if (!box.IsEnabled) { box.IsChecked = false; hints.Add(reason); }
+        }
+        Explain(GrantControlCheck, request.ControlInput, _settings.AllowControl, "Control");
+        Explain(GrantFilesCheck, request.FileAccess, _settings.AllowFiles, "Files");
+        Explain(GrantEffectsCheck, request.DesktopEffects, _settings.AllowEffects, "Animations");
+        ApprovalPolicyHint.Text = hints.Count == 0 ? "Choose what to grant. Unchecked permissions remain denied; file exchange does not expose an unselected folder." : string.Join("\n", hints);
+        ApprovalFolderText.Text = string.IsNullOrEmpty(_settings.SharedFolder) ? "No local folder selected. You can still grant file exchange and select Share my folder in the session later." : "Your shared folder: " + _settings.SharedFolder;
+    }
+    private async void ApprovalFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog { Title = "Select the folder this Controller may browse after Files approval" };
+        if (dialog.ShowDialog(this) != true) return;
+        string old = _settings.SharedFolder;
+        try { _settings.SharedFolder = dialog.FolderName; await _settings.SaveAsync(); RefreshApprovalPermissions(); SettingsPage.Load(_settings); }
+        catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)
+        { _settings.SharedFolder = old; ApprovalPolicyHint.Text = ex.Message; }
     }
     private async void Approve_Click(object sender, RoutedEventArgs e)
     {
@@ -198,7 +227,7 @@ public partial class MainWindow : Window
                 AuthenticationException => "Host identity failed or a saved key changed. Never bypass a changed pin; verify its full fingerprint independently.",
                 UnauthorizedAccessException => "Host denied access (consent/password/trusted-key policy).",
                 OperationCanceledException => "Connection cancelled or approval timed out.",
-                IOException => ex.Message.StartsWith("Device not found", StringComparison.Ordinal) ? ex.Message : "Connection failed. Update both endpoints to v0.3 and check the configured TCP / UDP discovery firewall rules.",
+                IOException => ex.Message.StartsWith("Device not found", StringComparison.Ordinal) ? ex.Message : "Connection failed. Update both endpoints to v0.3.1 and check the configured TCP / UDP discovery firewall rules.",
                 _ => "Cannot reach the Host. Check availability, port and Private-network firewall."
             };
             ConnectionStatus.Text = "Not connected";
@@ -218,8 +247,12 @@ public partial class MainWindow : Window
         var close = new Button { Content = "×", Padding = new Thickness(5, 0, 5, 0), Margin = new Thickness(10, 0, 0, 0), Background = Brushes.Transparent, ToolTip = "Disconnect this device" };
         header.Children.Add(close);
         var tab = new TabItem { Header = header, Content = view };
-        HostSessionRuntime? host = null;
-        if (!owned) host = new(session, _settings, operation => ConfirmSensitiveAsync(operation), status => view.SetStatus(status));
+        var host = new HostSessionRuntime(session, _settings, operation => ConfirmSensitiveAsync(operation), status => view.SetStatus(status));
+        view.ActionReported = Log;
+        view.ShareLocalFolder = folder => { host.ShareFolder(folder); return Task.CompletedTask; };
+        view.StopLocalSharing = host.StopSharing;
+        view.ConfiguredFolder = () => _settings.SharedFolder;
+        view.SetLocalFolder(host.SharedFolder);
         var context = new WorkspaceSession(session, view, tab, host, owned); _sessions.Add(session, context);
         view.FullScreen = SetFullScreen;
         view.CloseRequested = () => session.DisconnectAsync();
@@ -249,31 +282,53 @@ public partial class MainWindow : Window
             if (_closing) return false;
             if (operation == Operation.RequestInputLock)
                 return MessageBox.Show(this, "The Controller requests blocking your PHYSICAL MOUSE AND KEYBOARD for at most 30 seconds. Windows may require elevation. Ctrl+Alt+Del releases the block immediately; disconnect/process exit also releases it.\n\nAllow this one temporary block?", "RemoteDesk · local input consent", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
+            if (_restartPending) return false;
+            if (ElevationLauncher.IsElevated()) { ErrorText.Text = "RemoteDesk is already running as administrator."; return false; }
             bool accepted = MessageBox.Show(this, "The Controller requests restarting RemoteDesk as administrator. All of this app's sessions will close. You must approve the NORMAL WINDOWS UAC prompt yourself. A different Windows account can have a different device ID.\n\nRestart with UAC now?", "RemoteDesk · admin restart", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
-            if (accepted) _ = RestartElevatedAsync(); return accepted;
+            if (accepted) { _restartPending = true; _ = RestartElevatedAsync(); } return accepted;
         });
     }
     private async Task RestartElevatedAsync()
     {
-        await Task.Delay(1500); // Allow the authenticated reply to leave before closing the Host channel.
+        bool wasAvailable = ListenCheck.IsChecked == true;
+        await Task.Delay(1500); // Let the authenticated reply leave before closing the Host channel.
         try
         {
+            if (_closing) return;
             await StopAvailabilityAsync();
-            if (Environment.ProcessPath is null) throw new IOException("Cannot find the executable.");
-            var started = Process.Start(new ProcessStartInfo(Environment.ProcessPath) { UseShellExecute = true, Verb = "runas", WorkingDirectory = AppContext.BaseDirectory });
-            if (started is not null) Close();
+            string executable = Environment.ProcessPath ?? throw new IOException("Cannot find the executable.");
+            bool started = await Task.Run(() => ElevationLauncher.Start(executable, AppContext.BaseDirectory));
+            if (!started) throw new IOException("Windows did not start an elevated process.");
+            Close();
         }
         catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException)
-        { ErrorText.Text = "UAC restart cancelled or failed. No elevation was bypassed."; await StartAvailabilityAsync(); }
+        {
+            ErrorText.Text = "UAC restart cancelled or failed. No elevation was bypassed. Reconnect after incoming availability is restored.";
+            Log("Windows UAC restart cancelled or failed; no elevation bypass attempted.");
+            if (wasAvailable && !_closing)
+            {
+                try { await StartAvailabilityAsync(); }
+                catch (SocketException) { ListenCheck.IsChecked = false; ErrorText.Text = "UAC was not completed; the listening port is busy. Change the port or close duplicate instances."; }
+            }
+        }
+        finally { _restartPending = false; }
     }
     private async Task SaveSettingsAsync(AppSettings settings)
     {
         bool available = ListenCheck.IsChecked == true;
+        bool restart = settings.Port != _settings.Port;
         _listenerChanging = true; ListenCheck.IsEnabled = false;
         try
         {
-            await settings.SaveAsync(); await StopAvailabilityAsync(); _settings = settings;
-            if (available) await StartAvailabilityAsync();
+            await settings.SaveAsync();
+            if (restart) await StopAvailabilityAsync();
+            _settings = settings;
+            foreach (var context in _sessions.Values.ToArray())
+            {
+                context.Host?.UpdateSettings(settings); context.View.SetLocalFolder(context.Host?.SharedFolder);
+            }
+            RefreshApprovalPermissions();
+            if (restart && available) await StartAvailabilityAsync();
         }
         catch (SocketException) { ListenCheck.IsChecked = false; throw new IOException("Settings saved, but the new TCP port is busy. Choose another or close duplicate instances."); }
         finally { ListenCheck.IsEnabled = true; _listenerChanging = false; }

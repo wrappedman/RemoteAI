@@ -1,7 +1,7 @@
-<Window x:Class="RemoteDesk.Desktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:RemoteDesk.Desktop" Title="RemoteDesk — Workspace" Width="1400" Height="900" MinWidth="1080" MinHeight="700" Background="{StaticResource Background}" Foreground="#EAF0F8" Loaded="Window_Loaded" Closing="Window_Closing" PreviewKeyDown="Window_KeyDown" WindowStartupLocation="CenterScreen">
+<Window x:Class="RemoteDesk.Desktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:RemoteDesk.Desktop" Title="RemoteDesk — Workspace" Icon="Assets/RemoteDesk.ico" Width="1400" Height="900" MinWidth="1080" MinHeight="700" Background="{StaticResource Background}" Foreground="#EAF0F8" Loaded="Window_Loaded" Closing="Window_Closing" PreviewKeyDown="Window_KeyDown" WindowStartupLocation="CenterScreen">
  <Grid Background="{StaticResource Background}"><Grid.ColumnDefinitions><ColumnDefinition x:Name="RailColumn" Width="218"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
   <Border Background="#101317" BorderBrush="#29323F" BorderThickness="0,0,1,0"><Grid Margin="18,22,18,18"><Grid.RowDefinitions><RowDefinition Height="65"/><RowDefinition Height="44"/><RowDefinition Height="*"/><RowDefinition Height="185"/></Grid.RowDefinitions>
-   <StackPanel Orientation="Horizontal"><TextBlock Text="❯_" FontSize="27" Foreground="#64AAFF" FontWeight="Bold"/><StackPanel Margin="10,2,0,0"><TextBlock Text="REMOTEDESK" FontSize="17" FontWeight="Bold"/><TextBlock Text="WORKSPACE / 0.3" FontSize="9" Foreground="#8193AB" Margin="0,5,0,0"/></StackPanel></StackPanel>
+   <StackPanel Orientation="Horizontal"><Image Source="Assets/RemoteDesk.png" Width="30" Height="30" VerticalAlignment="Top" Margin="0,2,0,0"/><StackPanel Margin="10,2,0,0"><TextBlock Text="REMOTEDESK" FontSize="17" FontWeight="Bold"/><TextBlock Text="WORKSPACE / 0.3.1" FontSize="9" Foreground="#8193AB" Margin="0,5,0,0"/></StackPanel></StackPanel>
    <TextBox Grid.Row="1" x:Name="SearchBox" Tag="Search saved devices" Height="36" TextChanged="Search_Changed"/>
    <StackPanel Grid.Row="2"><TextBlock Text="WORKSPACE" FontSize="10" Foreground="#8193AB" Margin="0,24,0,12"/><Button Content="Connection center" Click="Home_Click" Background="#1B2B43"/><Button Content="Settings" Click="Settings_Click" Margin="0,8,0,0"/>
     <DockPanel Margin="0,25,0,10"><TextBlock Text="SAVED DEVICES" FontSize="10" Foreground="#8193AB" VerticalAlignment="Center"/><Button Content="+" HorizontalAlignment="Right" Padding="8,2" Click="SaveTarget_Click"/></DockPanel>
@@ -11,12 +11,15 @@
   </Grid></Border>
   <TabControl Grid.Column="1" x:Name="Workspace" Background="#10151C" BorderThickness="0" SelectionChanged="Workspace_SelectionChanged">
    <TabItem x:Name="ConnectionCenterTab" Header="⌂  Connection center">
-    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel Margin="28" MaxWidth="950" HorizontalAlignment="Left">
+    <ScrollViewer x:Name="CenterScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" VerticalContentAlignment="Stretch"><Grid x:Name="CenterContent" Margin="24">
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*" MinHeight="140"/></Grid.RowDefinitions>
+     <StackPanel>
      <TextBlock Text="Your remote workspace" FontSize="25" FontWeight="SemiBold"/><TextBlock Text="Connect by ID. Every active device opens in its own full-size tab." Foreground="#8EA2BD" Margin="0,8,0,20"/>
-     <Grid Width="760"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+     </StackPanel>
+     <Grid x:Name="ConnectionCards" Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
       <Border Style="{StaticResource Card}" Padding="20"><StackPanel><TextBlock Text="Connect to a device" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="DESTINATION ID" Style="{StaticResource Caption}" Margin="0,17,0,7"/>
        <TextBox x:Name="TargetIdBox" Tag="123 456 789 012" FontSize="20" FontFamily="Consolas" Height="48" MaxLength="20"/>
-       <WrapPanel Margin="0,12,0,0"><CheckBox x:Name="RequestControlCheck" Content="Control" ToolTip="Request mouse and keyboard control" IsChecked="True" Margin="0,0,16,0"/><CheckBox x:Name="RequestFilesCheck" Content="Files" ToolTip="Request shared-folder and file-transfer access" IsChecked="True" Margin="0,0,16,0"/><CheckBox x:Name="RequestEffectsCheck" Content="Effects" ToolTip="Request temporary animation changes" Margin="0"/></WrapPanel>
+       <WrapPanel Margin="0,12,0,0"><CheckBox x:Name="RequestControlCheck" Content="Control" ToolTip="Request mouse and keyboard control" IsChecked="True" Margin="0,0,16,0"/><CheckBox x:Name="RequestFilesCheck" Content="Files" ToolTip="Request shared-folder and file-transfer access" IsChecked="True" Margin="0,0,16,0"/><CheckBox x:Name="RequestEffectsCheck" Content="Animations" IsChecked="True" ToolTip="Request temporary animation changes" Margin="0"/></WrapPanel>
        <Expander Header="Password / advanced connection" Foreground="#A2B6D0" Margin="0,14,0,12"><StackPanel Margin="0,10,0,0"><TextBlock Text="Password (trusted automatic access only)" Style="{StaticResource Caption}"/><PasswordBox x:Name="ConnectionPassword" MaxLength="256" Padding="8" Background="#11151C" Foreground="White" BorderBrush="#354151"/><CheckBox x:Name="ManualCheck" Content="Use manual address + full fingerprint" Margin="0,12,0,8"/>
         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="76"/></Grid.ColumnDefinitions><TextBox x:Name="AddressBox" Tag="LAN address"/><TextBox x:Name="PortBox" Grid.Column="2" Text="45831"/></Grid>
         <TextBox x:Name="FingerprintBox" Tag="Full Host fingerprint" TextWrapping="Wrap" FontFamily="Consolas" FontSize="11" Height="58" Margin="0,8,0,0"/>
@@ -31,16 +34,23 @@
        <TextBlock Text="LAN only · no Internet relay configured.&#x0a;Windows UAC / Secure Desktop restrictions apply." Foreground="#71859F" FontSize="11" LineHeight="18" TextWrapping="Wrap" Margin="0,18,0,0"/>
       </StackPanel></Border>
      </Grid>
+     <StackPanel Grid.Row="2">
      <Border x:Name="PairingPanel" Visibility="Collapsed" Background="#1C2C41" CornerRadius="8" Padding="15" Margin="0,16,0,0"><TextBlock x:Name="PairingText" TextWrapping="Wrap"/></Border>
      <Border x:Name="ApprovalPanel" Visibility="Collapsed" Background="#263043" BorderBrush="#64AAFF" BorderThickness="1" CornerRadius="10" Padding="20" Margin="0,16,0,0"><StackPanel><TextBlock Text="Incoming session — choose permissions" FontSize="18" FontWeight="SemiBold"/><TextBlock x:Name="ApprovalDetails" FontFamily="Consolas" FontSize="12" TextWrapping="Wrap" Margin="0,12,0,12"/>
-      <CheckBox x:Name="GrantControlCheck" Content="Grant mouse &amp; keyboard control"/><CheckBox x:Name="GrantFilesCheck" Content="Grant access to my configured shared folder"/><CheckBox x:Name="GrantEffectsCheck" Content="Grant temporary desktop animation changes"/><CheckBox x:Name="TrustControllerCheck" Content="Trust this full Controller key for future password-enabled access" Margin="0,10,0,10"/>
+      <CheckBox x:Name="GrantControlCheck" Content="Grant mouse &amp; keyboard control"/><CheckBox x:Name="GrantFilesCheck" Content="Allow file exchange / share the folder shown below"/><CheckBox x:Name="GrantEffectsCheck" Content="Grant temporary desktop animation changes"/><TextBlock x:Name="ApprovalPolicyHint" Foreground="#FFCB8B" FontSize="12" TextWrapping="Wrap" Margin="0,8,0,8"/>
+      <DockPanel Margin="0,4,0,8"><Button DockPanel.Dock="Right" Content="Choose shared folder…" Click="ApprovalFolder_Click" Margin="12,0,0,0"/><TextBlock x:Name="ApprovalFolderText" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="#9BB7D8"/></DockPanel>
+      <Button Content="Review permission policies (keeps this request open)" Click="Settings_Click" HorizontalAlignment="Left" Margin="0,0,0,8"/>
+      <CheckBox x:Name="TrustControllerCheck" Content="Trust this full Controller key for future password-enabled access" Margin="0,10,0,10"/>
       <TextBlock Text="Approving shares the primary screen. A short session code is only a correlation hint; use trusted full fingerprints on hostile networks." Foreground="#AFC0D8" TextWrapping="Wrap" FontSize="11"/>
-      <WrapPanel Margin="0,14,0,0"><Button Content="Approve selected permissions" Background="#275A49" Click="Approve_Click"/><Button Content="Reject" Click="Reject_Click" Margin="10,0,0,0"/></WrapPanel>
+      <WrapPanel Margin="0,14,0,0"><Button x:Name="ApproveButton" Content="Approve selected permissions" Background="#275A49" Click="Approve_Click"/><Button Content="Reject" Click="Reject_Click" Margin="10,0,0,0"/></WrapPanel>
      </StackPanel></Border>
      <TextBlock x:Name="ErrorText" Foreground="#FF9EAF" TextWrapping="Wrap" Margin="0,15,0,0"/>
-     <TextBlock Text="Recent activity" FontSize="15" FontWeight="SemiBold" Margin="0,22,0,10"/>
-     <ListBox x:Name="AuditList" Height="120" Background="#10151C" BorderBrush="#293443" Foreground="#8EA2BD" FontSize="11" FontFamily="Consolas"><ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Detail}" Foreground="#8EA2BD" Margin="4"/></DataTemplate></ListBox.ItemTemplate></ListBox>
-    </StackPanel></ScrollViewer>
+     </StackPanel>
+     <Grid Grid.Row="3" Margin="0,20,0,0"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+     <TextBlock Text="Recent activity" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,10"/>
+     <ListBox Grid.Row="1" x:Name="AuditList" MinHeight="110" Background="#10151C" BorderBrush="#293443" Foreground="#8EA2BD" FontSize="11" FontFamily="Consolas"><ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Detail}" Foreground="#8EA2BD" Margin="4"/></DataTemplate></ListBox.ItemTemplate></ListBox>
+     </Grid>
+    </Grid></ScrollViewer>
    </TabItem>
    <TabItem x:Name="SettingsTab" Header="Settings" Visibility="Collapsed"><local:SettingsView x:Name="SettingsPage"/></TabItem>
   </TabControl>

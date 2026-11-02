@@ -35,7 +35,7 @@ foreach (int length in new[] { -1, 0, 1, WireProtocol.MaxFrameBytes + 1, int.Max
 }
 await InvalidRead([0, 0, 0]);
 await InvalidRead([0, 0, 0, 10, 1, 2]);
-foreach (var text in new[] { "null", "{}", "not json", "{\"version\":3,\"unknown\":true}" })
+foreach (var text in new[] { "null", "{}", "not json", "{\"version\":4,\"unknown\":true}" })
 {
     var bytes = Encoding.UTF8.GetBytes(text); var frame = new byte[4 + bytes.Length];
     BinaryPrimitives.WriteInt32BigEndian(frame, bytes.Length); bytes.CopyTo(frame, 4); await InvalidRead(frame);
@@ -44,7 +44,7 @@ foreach (var text in new[] { "null", "{}", "not json", "{\"version\":3,\"unknown
 string valid = Encoding.UTF8.GetString(stream.ToArray().AsSpan(4));
 foreach (string invalid in new[] {
     valid.Replace("\"type\":\"ConnectionRequest\",", ""),
-    valid.Replace("\"version\":3", "\"version\":3,\"version\":3"),
+    valid.Replace("\"version\":4", "\"version\":4,\"version\":4"),
     valid.Replace("\"ConnectionRequest\"", "0") })
 {
     var bytes = Encoding.UTF8.GetBytes(invalid); var frame = new byte[4 + bytes.Length];
@@ -60,8 +60,8 @@ Console.WriteLine("PASS: roundtrip, replay, sequence, session, version, invalid 
 
 Invalid(() => WireProtocol.Validate(WireProtocol.Create(id, 1, MessageType.ScreenFrame, new(Jpeg: new byte[30]))));
 Invalid(() => WireProtocol.Validate(WireProtocol.Create(id, 1, MessageType.Ping, new(ViewScreen: true))));
-Console.WriteLine("PASS: protocol v3 screen payload validation and approval-only capability grants");
+Console.WriteLine("PASS: protocol v4 screen payload validation and approval-only capability grants");
 
 Invalid(() => WireProtocol.Validate(WireProtocol.Create(id, 1, MessageType.Input, new(Input: new(InputKind.Key)))));
 Invalid(() => WireProtocol.Validate(WireProtocol.Create(id, 1, MessageType.Command, new(Command: RemoteCommand.Create(Operation.WriteChunk) with { Data = new byte[32769] }))));
-Console.WriteLine("PASS: v3 input and file chunk bounds");
+Console.WriteLine("PASS: v4 input and file chunk bounds");

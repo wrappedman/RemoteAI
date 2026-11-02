@@ -14,6 +14,8 @@ using RemoteDesk.Discovery;
 using RemoteDesk.Protocol;
 using RemoteDesk.Security;
 using RemoteDesk.Windows;
+using RemoteDesk.Transport;
+using RemoteDesk.Files;
 internal static class Program
 {
     [STAThread]
@@ -30,6 +32,10 @@ internal static class Program
                 timer.Stop();
                 string path = args.Length > 0 ? args[0] : "RemoteDesk-workspace.png";
                 Screenshot(window, path);
+                TestResponsiveLayout(window);
+                if (window.Icon is null) throw new Exception("Application window icon missing.");
+                var launch = ElevationLauncher.CreateStartInfo("C:\\RemoteDesk\\RemoteDesk.exe", "C:\\RemoteDesk");
+                if (!launch.UseShellExecute || launch.Verb != "runas") throw new Exception("Admin restart does not invoke normal UAC.");
                 var number = (TextBox)window.FindName("IdentityBox");
                 if (number.GetRectFromCharacterIndex(number.Text.Length - 1, true).Right > number.ActualWidth - number.Padding.Right + 1)
                     throw new Exception("Numeric ID is clipped in the compact sidebar.");
@@ -44,6 +50,7 @@ internal static class Program
                 string verifier = PasswordVerifier.Create("Test-only-unique-password-123!");
                 if (!PasswordVerifier.Verify(verifier, "Test-only-unique-password-123!") || PasswordVerifier.Verify(verifier, "wrong-password-123!")) throw new Exception("DPAPI/PBKDF2 verifier failed.");
                 using (var input = new InputController()) input.Post(new(InputKind.ReleaseAll)); // No synthetic keys or physical blocking in CI.
+                await TestConsentAndFilesAsync(window, Path.GetDirectoryName(Path.GetFullPath(path))!);
                 await TestTabsAsync(window, Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!, "RemoteDesk-viewer.png"));
                 Console.WriteLine("PASS: multiple full-size session tabs, numeric discovery, real desktop capture/binary transfer/background decoding, frame refresh, independent disconnect, fullscreen, settings, DPAPI password verifier and input worker cleanup.");
                 window.Closed += (_, _) => app.Shutdown(0); window.Close();
@@ -55,6 +62,107 @@ internal static class Program
             }
         };
         timer.Start(); return app.Run();
+    }
+    private static void TestResponsiveLayout(MainWindow window)
+    {
+        double width = window.Width;
+        foreach (double size in new[] { 1100d, 1400d, 1680d })
+        {
+            window.Width = size; window.UpdateLayout();
+            var content = (FrameworkElement)window.FindName("CenterContent");
+            var cards = (FrameworkElement)window.FindName("ConnectionCards");
+            if (cards.ActualWidth < content.ActualWidth - 2 || cards.ActualWidth < 760)
+                throw new Exception("Connection center keeps an unused fixed-width column.");
+        }
+        window.Width = width; window.UpdateLayout();
+    }
+    private static async Task SavePolicyAsync(MainWindow window, AppSettings policy)
+    {
+        var page = (SettingsView)window.FindName("SettingsPage"); page.Load(policy);
+        ((Button)page.FindName("SaveSettingsButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Until(() => ((Button)page.FindName("SaveSettingsButton")).IsEnabled && ((TextBlock)page.FindName("SettingsStatus")).Text.StartsWith("Saved."));
+    }
+    private static async Task TestConsentAndFilesAsync(MainWindow window, string screenshots)
+    {
+        string temporary = Path.Combine(Path.GetTempPath(), "RemoteDesk-workspace-" + Guid.NewGuid().ToString("N"));
+        string hostRoot = Path.Combine(temporary, "host"), clientRoot = Path.Combine(temporary, "controller");
+        Directory.CreateDirectory(hostRoot); Directory.CreateDirectory(clientRoot);
+        await File.WriteAllTextAsync(Path.Combine(hostRoot, "from-host.txt"), "Host selected folder");
+        await File.WriteAllTextAsync(Path.Combine(clientRoot, "from-controller.txt"), "Controller selected folder");
+        using var identity = DeviceIdentity.CreateForTesting();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        try
+        {
+            await SavePolicyAsync(window, new AppSettings { AllowEffects = false });
+            string pin = ((TextBox)window.FindName("FullFingerprintBox")).Text;
+            var connecting = SecureSession.ConnectAsync("127.0.0.1", 45831, pin, "Consent regression", identity, _ => { }, deadline.Token,
+                requested: new(true, true, true, true));
+            await Until(() => ((FrameworkElement)window.FindName("ApprovalPanel")).Visibility == Visibility.Visible);
+            if (((CheckBox)window.FindName("GrantEffectsCheck")).IsEnabled || !((TextBlock)window.FindName("ApprovalPolicyHint")).Text.Contains("Animations"))
+                throw new Exception("Disabled animation grant has no policy explanation.");
+            if (!((CheckBox)window.FindName("GrantFilesCheck")).IsEnabled) throw new Exception("File exchange cannot be granted before choosing a folder.");
+            // Saving same-port policies while approving MUST NOT tear down the pending request.
+            await SavePolicyAsync(window, new AppSettings { SharedFolder = hostRoot, AllowEffects = true });
+            if (((FrameworkElement)window.FindName("ApprovalPanel")).Visibility != Visibility.Visible || connecting.IsCompleted)
+                throw new Exception("Policy save cancelled the pending approval.");
+            foreach (string name in new[] { "GrantControlCheck", "GrantFilesCheck", "GrantEffectsCheck" })
+            {
+                var box = (CheckBox)window.FindName(name); if (!box.IsEnabled) throw new Exception("Grant remained disabled after policy save: " + name);
+                box.IsChecked = true; if (box.IsChecked != true) throw new Exception("Grant checkbox did not toggle: " + name);
+            }
+            ((TabControl)window.FindName("Workspace")).SelectedItem = window.FindName("ConnectionCenterTab");
+            Screenshot(window, Path.Combine(screenshots, "RemoteDesk-approval.png"));
+            ((Button)window.FindName("ApproveButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await using var client = await connecting;
+            using var clientRuntime = new HostSessionRuntime(client, new AppSettings(), _ => Task.FromResult(false), _ => { });
+            client.Start();
+            await Until(() => window.ActiveViews.Any(v => v.Session.IsHost));
+            var hostView = window.ActiveViews.Single(v => v.Session.IsHost);
+            if (!client.Permissions.FileAccess || !client.Permissions.DesktopEffects) throw new Exception("Approval lost selected capabilities.");
+            // A Controller's configured folder is NOT silently exposed to the Host.
+            try { await hostView.Session.RequestAsync(RemoteCommand.Create(Operation.ShareInfo), deadline.Token); throw new Exception("Unselected Controller folder exposed."); }
+            catch (IOException ex) when (ex.Message.Contains("No folder")) { }
+            await using var clientView = new SessionView(client, 20, 960)
+            { ShareLocalFolder = folder => { clientRuntime.ShareFolder(folder); return Task.CompletedTask; }, StopLocalSharing = clientRuntime.StopSharing };
+            await clientView.ShareFolderAsync(clientRoot);
+            if (!((Button)hostView.FindName("FilesButton")).IsEnabled) throw new Exception("Incoming Host tab cannot browse an explicitly shared Controller folder.");
+            ((Button)hostView.FindName("FilesButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await Until(() => ((ListBox)hostView.FindName("FileList")).Items.OfType<FileEntry>().Any(e => e.Name == "from-controller.txt"));
+            if (!((TextBlock)hostView.FindName("RemoteFolderInfo")).Text.Contains(clientRoot)) throw new Exception("Remote folder identity not shown.");
+            var own = await client.RequestAsync(RemoteCommand.Create(Operation.ListFiles, ""), deadline.Token);
+            if (own.Entries?.Any(e => e.Name == "from-host.txt") != true) throw new Exception("Configured Host folder is not served by production runtime.");
+            string source = Path.Combine(temporary, "upload.bin"); await File.WriteAllBytesAsync(source, Enumerable.Range(0, 90000).Select(i => (byte)i).ToArray());
+            await FileTransferClient.UploadAsync(client, source, null, deadline.Token);
+            await FileTransferClient.UploadAsync(hostView.Session, source, null, deadline.Token);
+            if (!File.Exists(Path.Combine(hostRoot, "upload.bin")) || !File.Exists(Path.Combine(clientRoot, "upload.bin"))) throw new Exception("Two-way upload did not reach both selected roots.");
+            string downloaded = Path.Combine(temporary, "download.bin");
+            await FileTransferClient.DownloadAsync(hostView.Session, "upload.bin", downloaded, null, deadline.Token);
+            if (!(await File.ReadAllBytesAsync(source)).SequenceEqual(await File.ReadAllBytesAsync(downloaded))) throw new Exception("Reverse download corrupted content.");
+            // Host must never use symmetric file RPC to request input/admin/effects on Controller.
+            try { await hostView.Session.RequestAsync(RemoteCommand.Create(Operation.RequestAdmin), deadline.Token); throw new Exception("Reverse admin command allowed."); }
+            catch (UnauthorizedAccessException) { }
+            ((CheckBox)clientView.FindName("AnimationsCheck")).IsChecked = true;
+            await Until(() => ((TextBlock)clientView.FindName("ActionStatus")).Text.Contains("Animations disabled"));
+            if (((CheckBox)clientView.FindName("AnimationsCheck")).IsChecked != true) throw new Exception("Animation checkbox failed to keep acknowledged state.");
+            ((CheckBox)clientView.FindName("AnimationsCheck")).IsChecked = false;
+            await Until(() => ((TextBlock)clientView.FindName("ActionStatus")).Text.Contains("preferences restored"));
+            await SavePolicyAsync(window, new AppSettings { SharedFolder = hostRoot, AllowEffects = false });
+            if (client.Completion.IsCompleted) throw new Exception("Same-port settings disconnected an authorized session.");
+            ((CheckBox)clientView.FindName("AnimationsCheck")).IsChecked = true;
+            await Until(() => ((TextBlock)clientView.FindName("ActionStatus")).Text.Contains("Animations are not permitted"));
+            if (((CheckBox)clientView.FindName("AnimationsCheck")).IsChecked == true) throw new Exception("Refused animation update was not rolled back.");
+            ((Button)clientView.FindName("AdminButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await Until(() => ((TextBlock)clientView.FindName("ActionStatus")).Text.Contains("enable admin restart"));
+            await Task.Delay(1300); // Media/status refresh must not erase operation errors.
+            if (!((TextBlock)clientView.FindName("ActionStatus")).Text.Contains("enable admin restart")) throw new Exception("Admin denial hidden by frame status.");
+            ((Button)clientView.FindName("StopSharingButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            try { await hostView.Session.RequestAsync(RemoteCommand.Create(Operation.ListFiles, ""), deadline.Token); throw new Exception("Stopped share remained accessible."); }
+            catch (IOException) { }
+            await client.DisconnectAsync(); await Until(() => window.ActiveViews.Count == 0);
+            await SavePolicyAsync(window, new AppSettings());
+            Console.WriteLine("PASS: real local approval, policy explanations/hot-save, selected checkbox grants, production two-way folder listing/upload/download, explicit Controller share/revoke, animation acknowledgement/rollback, persistent admin errors, reverse-sensitive-command denial and UAC launch contract.");
+        }
+        finally { Directory.Delete(temporary, true); }
     }
     private static LanAgent CreateHost(DeviceIdentity identity) => new(identity)
     {

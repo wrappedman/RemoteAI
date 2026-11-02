@@ -16,7 +16,7 @@ public sealed record Envelope(
 
 public static class WireProtocol
 {
-    public const int Version = 3;
+    public const int Version = 4;
     public const int MaxFrameBytes = 768 * 1024;
     public const int MaxJpegBytes = 512 * 1024;
     public const int MaxMessagesPerSession = 1000000;
@@ -87,7 +87,7 @@ public static class WireProtocol
         if (message.Type == MessageType.ScreenFrame)
         {
             bytes = new byte[44 + message.Payload.Jpeg!.Length];
-            "RDV3"u8.CopyTo(bytes); message.SessionId.TryWriteBytes(bytes.AsSpan(4, 16));
+            "RDV4"u8.CopyTo(bytes); message.SessionId.TryWriteBytes(bytes.AsSpan(4, 16));
             BinaryPrimitives.WriteInt64BigEndian(bytes.AsSpan(20, 8), message.Sequence);
             message.MessageId.TryWriteBytes(bytes.AsSpan(28, 16));
             message.Payload.Jpeg.CopyTo(bytes, 44);
@@ -109,7 +109,7 @@ public static class WireProtocol
         if (size < 2 || size > MaxFrameBytes) throw new InvalidDataException("Invalid frame length.");
         var bytes = new byte[size];
         await stream.ReadExactlyAsync(bytes, token).ConfigureAwait(false);
-        if (bytes.AsSpan().StartsWith("RDV3"u8))
+        if (bytes.AsSpan().StartsWith("RDV4"u8))
         {
             if (bytes.Length < 60) throw new InvalidDataException("Truncated media frame.");
             var media = new Envelope(Version, new Guid(bytes.AsSpan(28, 16)), new Guid(bytes.AsSpan(4, 16)),

@@ -55,7 +55,7 @@ public partial class SettingsView : UserControl
                 DefaultWidth = int.Parse(((ComboBoxItem)WidthSetting.SelectedItem).Content.ToString()!)
             };
             settings.Validate(); if (SaveRequested is not null) await SaveRequested(settings);
-            Load(settings); SettingsStatus.Text = "Saved. Incoming availability restarted with the selected policy.";
+            Load(settings); SettingsStatus.Text = "Saved. Policies and shared folder updated; existing grants are unchanged. Only a port change restarts incoming availability.";
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
         { SettingsStatus.Text = ex.Message; }

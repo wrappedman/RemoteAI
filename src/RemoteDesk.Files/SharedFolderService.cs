@@ -61,6 +61,8 @@ public sealed class SharedFolderService
     {
         switch (c.Operation)
         {
+            case Operation.ShareInfo:
+                return c.Reply() with { Path = _root };
             case Operation.ListFiles:
                 string dir = SafePath(c.Path);
                 var entries = Directory.EnumerateFileSystemEntries(dir).Where(p => !Path.GetFileName(p).StartsWith(".remotedesk-", StringComparison.OrdinalIgnoreCase)).Take(257).ToArray();
