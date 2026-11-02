@@ -1,0 +1,2 @@
+Windows runner GDI native-downscale/JPEG benchmark: 33.2 ms per frame, 30,250 encoded bytes (640px profile).
+Not a physical LAN latency or GPU certification. Actual receive FPS is displayed per session.

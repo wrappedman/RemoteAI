@@ -1,8 +1,8 @@
 # Verified Windows build
 
-Source commit: 4e04d2637d19e828c6b21311085aa4e4cb14c20e
-Workflow: https://github.com/wrappedman/RemoteAI/actions/runs/41405636467
+Source commit: 157666e3b0be642f8190320f5bee110f95f50577
+Workflow: https://github.com/wrappedman/RemoteAI/actions/runs/41406272697
 Runner: windows-latest, Windows x64, .NET 10 SDK.
-Checks: Release solution build, Core/Protocol/Security integration suites, Windows CNG persistence and non-exportability, WPF startup plus end-to-end numeric discovery, approved TLS, real GDI primary-desktop capture, JPEG transport/decoding, disconnect and close.
+Checks: Release solution build, Core/Protocol/Security integration suites, Windows CNG persistence and non-exportability, WPF startup, multi-tab simultaneous sessions, real GDI capture/binary media/background decoding/fullscreen, DPAPI/PBKDF2 password verifier, input-worker cleanup; TLS input permission and resumable upload/download SHA-256/sandbox tests.
 Manual two-PC LAN, DPI and resource acceptance: pending (see docs/Acceptance.md).
-Package is unsigned. Primary display viewing is implemented. No remote input, files, unattended access or Internet ID routing.
+Package is unsigned. Primary-display viewing, consent-gated input, virtual shared folder and resumable transfers implemented. Admin/input-block/UAC hardware behavior and physical two-PC performance still require manual acceptance. No Internet relay or background unattended service.
