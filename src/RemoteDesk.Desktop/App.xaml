@@ -1,0 +1,32 @@
+<Application x:Class="RemoteDesk.Desktop.App" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" StartupUri="MainWindow.xaml">
+  <Application.Resources>
+    <SolidColorBrush x:Key="Background" Color="#101216"/>
+    <SolidColorBrush x:Key="Surface" Color="#191D24"/>
+    <SolidColorBrush x:Key="BorderBrush" Color="#2B323E"/>
+    <SolidColorBrush x:Key="Muted" Color="#96A2B5"/>
+    <SolidColorBrush x:Key="Accent" Color="#64AAFF"/>
+    <Style TargetType="TextBlock"><Setter Property="Foreground" Value="#EBF0F8"/><Setter Property="FontFamily" Value="Segoe UI"/></Style>
+    <Style TargetType="Button">
+      <Setter Property="Foreground" Value="#DCE6F5"/><Setter Property="Background" Value="#252D39"/>
+      <Setter Property="BorderBrush" Value="#354151"/><Setter Property="Padding" Value="16,10"/>
+      <Setter Property="Cursor" Value="Hand"/><Setter Property="FontSize" Value="13"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+        <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="7" Padding="{TemplateBinding Padding}">
+          <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Opacity" Value="0.8"/></Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.35"/><Setter Property="Cursor" Value="Arrow"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="TextBox">
+      <Setter Property="Foreground" Value="#EAF0F8"/><Setter Property="Background" Value="#11151C"/><Setter Property="BorderBrush" Value="#354151"/>
+      <Setter Property="CaretBrush" Value="#64AAFF"/><Setter Property="Padding" Value="12,10"/><Setter Property="FontSize" Value="13"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox"><Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6"><ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/></Border></ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="#191D24"/><Setter Property="BorderBrush" Value="#2B323E"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="24"/></Style>
+    <Style x:Key="Caption" TargetType="TextBlock"><Setter Property="Foreground" Value="#96A2B5"/><Setter Property="FontSize" Value="12"/><Setter Property="Margin" Value="0,0,0,8"/></Style>
+  </Application.Resources>
+</Application>

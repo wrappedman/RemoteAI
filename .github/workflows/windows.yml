@@ -1,0 +1,52 @@
+name: Windows build and verification
+on:
+  push:
+    branches: ['arena/3ab7c5f0-remoteai']
+    paths-ignore: ['run/**', '**/*.md']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build solution
+        run: dotnet build RemoteDesk.sln -c Release
+      - name: Core, protocol and real TLS integration tests
+        shell: pwsh
+        run: |
+          foreach ($name in @('Core', 'Protocol', 'Security')) {
+            dotnet run --project "tests/RemoteDesk.$name.Tests" -c Release --no-build
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Publish Windows x64 executable
+        run: dotnet publish src/RemoteDesk.Desktop -c Release -r win-x64 --self-contained false -o artifacts/run
+      - name: WPF startup smoke test
+        shell: pwsh
+        run: |
+          $p = Start-Process "$pwd/artifacts/run/RemoteDesk.exe" -PassThru
+          Start-Sleep -Seconds 8
+          $p.Refresh()
+          if ($p.HasExited) { throw "RemoteDesk exited during startup: $($p.ExitCode)" }
+          if ($p.MainWindowHandle -eq 0) { Stop-Process $p.Id; throw 'No WPF window created' }
+          Write-Host "PASS: WPF window opened: $($p.MainWindowTitle)"
+          Stop-Process $p.Id
+      - name: Publish self-contained portable package
+        shell: pwsh
+        run: |
+          dotnet publish src/RemoteDesk.Desktop -c Release -r win-x64 --self-contained true -o artifacts/portable -p:DebugType=None -p:DebugSymbols=false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item run/README.md artifacts/run/README.md
+          Compress-Archive -Path artifacts/portable/* -DestinationPath artifacts/run/RemoteDesk-win-x64-portable.zip -CompressionLevel Optimal
+          Get-ChildItem artifacts/run -File | Where-Object Name -ne SHA256SUMS.txt | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash)  $($_.Name)" } | Set-Content artifacts/run/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RemoteDesk-win-x64
+          path: artifacts/run/
+          retention-days: 14
