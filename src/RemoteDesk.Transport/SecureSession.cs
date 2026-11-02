@@ -46,7 +46,7 @@ public sealed class SecureSession : IAsyncDisposable
             state(SessionState.Connecting);
             using var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             connectTimeout.CancelAfter(TimeSpan.FromSeconds(10));
-            await client.ConnectAsync(address, port, connectTimeout.Token);
+            await client.ConnectAsync(address, port, connectTimeout.Token).ConfigureAwait(false);
             state(SessionState.Authenticating);
             stream = new SslStream(client.GetStream(), false, (_, cert, _, errors) => DeviceIdentity.ValidatePeer(cert, errors, expectedHostId));
             await stream.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
@@ -55,18 +55,19 @@ public sealed class SecureSession : IAsyncDisposable
                 EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
                 CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
                 AllowRenegotiation = false
-            }, connectTimeout.Token);
+            }, connectTimeout.Token).ConfigureAwait(false);
             state(SessionState.WaitingForApproval);
             using var approvalTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             approvalTimeout.CancelAfter(TimeSpan.FromSeconds(60));
             var id = Guid.NewGuid();
             await WireProtocol.WriteAsync(stream, WireProtocol.Create(id, 1, MessageType.ConnectionRequest,
-                new(identity.DeviceId, displayName)), approvalTimeout.Token);
+                new(identity.DeviceId, displayName)), approvalTimeout.Token).ConfigureAwait(false);
             var guard = new MessageGuard(id);
-            var response = await WireProtocol.ReadAsync(stream, approvalTimeout.Token);
+            var response = await WireProtocol.ReadAsync(stream, approvalTimeout.Token).ConfigureAwait(false);
             guard.Accept(response);
             if (response.Type == MessageType.Rejection) throw new UnauthorizedAccessException("The Host declined the request.");
             if (response.Type != MessageType.Approval) throw new InvalidDataException("Expected attended approval.");
+            token.ThrowIfCancellationRequested();
             state(SessionState.Connected);
             return new(client, stream, id, guard, expectedHostId, address);
         }
@@ -90,8 +91,8 @@ public sealed class SecureSession : IAsyncDisposable
                 ServerCertificate = identity.Certificate, ClientCertificateRequired = true,
                 EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
                 CertificateRevocationCheckMode = X509RevocationMode.NoCheck, AllowRenegotiation = false
-            }, handshakeTimeout.Token);
-            var request = await WireProtocol.ReadAsync(stream, handshakeTimeout.Token);
+            }, handshakeTimeout.Token).ConfigureAwait(false);
+            var request = await WireProtocol.ReadAsync(stream, handshakeTimeout.Token).ConfigureAwait(false);
             var guard = new MessageGuard(request.SessionId);
             guard.Accept(request);
             var peerId = DeviceIdentity.Fingerprint(stream.RemoteCertificate!);
@@ -104,14 +105,15 @@ public sealed class SecureSession : IAsyncDisposable
             try
             {
                 accepted = await approve(new(peerId, request.Payload.DisplayName!, client.Client.RemoteEndPoint?.ToString() ?? "Unknown"),
-                    approvalTimeout.Token).WaitAsync(approvalTimeout.Token);
+                    approvalTimeout.Token).WaitAsync(approvalTimeout.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!token.IsCancellationRequested) { accepted = false; }
             using var replyTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             replyTimeout.CancelAfter(TimeSpan.FromSeconds(5));
             await WireProtocol.WriteAsync(stream, WireProtocol.Create(request.SessionId, 1,
-                accepted ? MessageType.Approval : MessageType.Rejection), replyTimeout.Token);
+                accepted ? MessageType.Approval : MessageType.Rejection), replyTimeout.Token).ConfigureAwait(false);
             if (!accepted) { stream.Dispose(); client.Dispose(); return null; }
+            token.ThrowIfCancellationRequested();
             state(SessionState.Connected);
             return new(client, stream, request.SessionId, guard, peerId, request.Payload.DisplayName!);
         }
@@ -133,11 +135,11 @@ public sealed class SecureSession : IAsyncDisposable
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
                 timeout.CancelAfter(TimeSpan.FromSeconds(12));
-                var message = await WireProtocol.ReadAsync(_stream, timeout.Token);
+                var message = await WireProtocol.ReadAsync(_stream, timeout.Token).ConfigureAwait(false);
                 _guard.Accept(message);
                 switch (message.Type)
                 {
-                    case MessageType.Ping: await SendAsync(MessageType.Pong, _stop.Token); break;
+                    case MessageType.Ping: await SendAsync(MessageType.Pong, _stop.Token).ConfigureAwait(false); break;
                     case MessageType.Pong: Activity?.Invoke("Heartbeat acknowledged"); break;
                     case MessageType.Disconnect: Close("Peer disconnected"); return;
                     default: throw new InvalidDataException("Unexpected message in connected state.");
@@ -154,7 +156,7 @@ public sealed class SecureSession : IAsyncDisposable
         try
         {
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
-            while (await timer.WaitForNextTickAsync(_stop.Token)) await SendAsync(MessageType.Ping, _stop.Token);
+            while (await timer.WaitForNextTickAsync(_stop.Token).ConfigureAwait(false)) await SendAsync(MessageType.Ping, _stop.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) when (ex is InvalidDataException or IOException or SocketException or ObjectDisposedException) { Close("Connection lost"); }
@@ -163,18 +165,18 @@ public sealed class SecureSession : IAsyncDisposable
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
         timeout.CancelAfter(TimeSpan.FromSeconds(5));
-        await _writeGate.WaitAsync(timeout.Token);
+        await _writeGate.WaitAsync(timeout.Token).ConfigureAwait(false);
         try
         {
             if (_sequence >= WireProtocol.MaxMessagesPerSession) throw new InvalidDataException("Session message limit reached. Reconnect with fresh approval.");
-            await WireProtocol.WriteAsync(_stream, WireProtocol.Create(_id, ++_sequence, type), timeout.Token);
+            await WireProtocol.WriteAsync(_stream, WireProtocol.Create(_id, ++_sequence, type), timeout.Token).ConfigureAwait(false);
         }
         finally { _writeGate.Release(); }
     }
     public async Task DisconnectAsync()
     {
         if (Volatile.Read(ref _closed) != 0) return;
-        try { await SendAsync(MessageType.Disconnect, CancellationToken.None); }
+        try { await SendAsync(MessageType.Disconnect, CancellationToken.None).ConfigureAwait(false); }
         catch (Exception ex) when (ex is InvalidDataException or IOException or SocketException or OperationCanceledException or ObjectDisposedException) { }
         finally { Close("Disconnected locally"); }
     }
@@ -189,9 +191,9 @@ public sealed class SecureSession : IAsyncDisposable
     }
     public async ValueTask DisposeAsync()
     {
-        await DisconnectAsync();
-        if (_receiveTask is not null) await _receiveTask;
-        if (_heartbeatTask is not null) await _heartbeatTask;
+        await DisconnectAsync().ConfigureAwait(false);
+        if (_receiveTask is not null) await _receiveTask.ConfigureAwait(false);
+        if (_heartbeatTask is not null) await _heartbeatTask.ConfigureAwait(false);
         // No producers remain after both loops finish.
         _writeGate.Dispose(); _stop.Dispose();
     }

@@ -226,6 +226,7 @@ public partial class MainWindow : Window
     private async void Disconnect_Click(object sender, RoutedEventArgs e)
     {
         _operation?.Cancel(); _approval?.TrySetResult(false);
+        if (_incoming && _session is null) _agent?.CancelCurrent();
         if (_session is not null) { SetState(SessionState.Disconnecting); await _session.DisconnectAsync(); }
     }
     private void Copy_Click(object sender, RoutedEventArgs e)

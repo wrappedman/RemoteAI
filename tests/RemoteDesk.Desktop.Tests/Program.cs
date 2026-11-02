@@ -13,15 +13,18 @@ internal static class Program
     {
         var app = new App();
         app.InitializeComponent();
-        app.StartupUri = null;
         app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
-        var window = new MainWindow();
         int ticks = 0;
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         timer.Tick += (_, _) =>
         {
             try
             {
+                if (app.MainWindow is not MainWindow window)
+                {
+                    if (++ticks >= 80) throw new Exception("StartupUri did not create the main window.");
+                    return;
+                }
                 var id = (TextBox)window.FindName("IdentityBox");
                 if (id.Text.Length != 64)
                 {
@@ -45,10 +48,10 @@ internal static class Program
             }
             catch (Exception ex)
             {
-                timer.Stop(); Console.Error.WriteLine(ex); window.Close(); app.Shutdown(1);
+                timer.Stop(); Console.Error.WriteLine(ex); app.MainWindow?.Close(); app.Shutdown(1);
             }
         };
         timer.Start();
-        return app.Run(window);
+        return app.Run();
     }
 }

@@ -78,4 +78,30 @@ await using var recovered = await SecureSession.ConnectAsync("127.0.0.1", port, 
 recovered.Start();
 await restarted.DisposeAsync();
 await recovered.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+// Cancel an incoming connection before TLS completes without shutting down the listener.
+var authenticating = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+var idle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+await using var cancellable = new LanAgent(host)
+{
+    Approve = (_, _) => Task.FromResult(true),
+    StateChanged = state =>
+    {
+        if (state == RemoteDesk.Core.SessionState.Authenticating) authenticating.TrySetResult();
+        if (state == RemoteDesk.Core.SessionState.Disconnected) idle.TrySetResult();
+    }
+};
+cancellable.Start(0, IPAddress.Loopback);
+using (var rawClient = new TcpClient())
+{
+    await rawClient.ConnectAsync(IPAddress.Loopback, cancellable.Port, deadline.Token);
+    await authenticating.Task.WaitAsync(deadline.Token);
+    cancellable.CancelCurrent();
+    await idle.Task.WaitAsync(TimeSpan.FromSeconds(5));
+}
+await Task.Delay(100, deadline.Token);
+await using (var afterCancel = await SecureSession.ConnectAsync("127.0.0.1", cancellable.Port, host.DeviceId, "After cancel", controller, _ => { }, deadline.Token))
+{
+    afterCancel.Start(); await afterCancel.DisconnectAsync();
+}
+Console.WriteLine("PASS: Host cancels an incomplete TLS handshake; listener remains usable");
 Console.WriteLine("PASS: mTLS, pin mismatch, key binding, attended approval/rejection, heartbeat, orderly disconnect, approval cancellation, Agent restart, abrupt transport loss");

@@ -55,19 +55,19 @@ public static class WireProtocol
         if (bytes.Length > MaxFrameBytes) throw new InvalidDataException("Frame exceeds size limit.");
         var header = new byte[4];
         BinaryPrimitives.WriteInt32BigEndian(header, bytes.Length);
-        await stream.WriteAsync(header, token);
-        await stream.WriteAsync(bytes, token);
-        await stream.FlushAsync(token);
+        await stream.WriteAsync(header, token).ConfigureAwait(false);
+        await stream.WriteAsync(bytes, token).ConfigureAwait(false);
+        await stream.FlushAsync(token).ConfigureAwait(false);
     }
 
     public static async Task<Envelope> ReadAsync(Stream stream, CancellationToken token)
     {
         var header = new byte[4];
-        await stream.ReadExactlyAsync(header, token);
+        await stream.ReadExactlyAsync(header, token).ConfigureAwait(false);
         int size = BinaryPrimitives.ReadInt32BigEndian(header);
         if (size < 2 || size > MaxFrameBytes) throw new InvalidDataException("Invalid frame length.");
         var bytes = new byte[size];
-        await stream.ReadExactlyAsync(bytes, token);
+        await stream.ReadExactlyAsync(bytes, token).ConfigureAwait(false);
         try
         {
             var result = JsonSerializer.Deserialize<Envelope>(bytes, JsonOptions)
