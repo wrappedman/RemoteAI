@@ -1,50 +1,47 @@
-# RemoteDesk v0.2 — numeric LAN IDs + live desktop viewing
+# RemoteDesk 0.3 — remote workspace
 
-English WPF workspace inspired by `01.jpg`, persistent device keys, attended consent, encrypted LAN desktop viewing.
+English Windows WPF client with numeric LAN discovery, per-device tabs, explicit permissions, mouse/keyboard control and resumable file transfer. Design follows the supplied `01.jpg`; **Connection center is separate from full-size session tabs**.
 
 ## Run
 
-Extract **`run/RemoteDesk-win-x64-portable.zip`** to a folder and run `RemoteDesk.exe` inside it. Runtime included. Alternatively use `run/RemoteDesk.exe` with all its companion files and .NET 10 Desktop Runtime x64 installed. Both endpoints must use v0.2; the old v1 protocol is deliberately rejected.
+Extract `run/RemoteDesk-win-x64-portable.zip` and launch `RemoteDesk.exe`. Runtime included. Update **both endpoints** to 0.3 / protocol v3; older builds intentionally fail closed. Alternatively run the framework-dependent EXE with all companions and .NET 10 Desktop Runtime x64.
 
-1. Open RemoteDesk on both Windows devices on the **same private LAN**. Availability is on while the visible app is running.
-2. Share the Host's **12-digit RemoteDesk ID**, e.g. `123 456 789 012`.
-3. Enter that ID on the Controller and choose **View remote screen**. No IP or fingerprint entry is required in the default flow.
-4. Compare the displayed session code and confirm the intended requester. The Host explicitly selects **Approve & share my screen**.
-5. The Controller displays the actual primary desktop. **Viewing remote desktop** is shown only after an image has decoded, never merely because TLS connected.
-6. **Disconnect**, **Stop sharing**, disabling Host availability, or closing the Host app ends transmission.
+1. Open the app on both PCs on a trusted private LAN. Enter the Host's 12-digit ID in Connection center.
+2. Choose requested Control / Files / Effects permissions. Host explicitly chooses which to grant; screen approval alone never grants input or files.
+3. A new tab opens beside Connection center. Up to **8 outgoing devices**, independently disconnectable, plus **1 incoming Controller**. Host admission stays single-controller to avoid competing input.
+4. Session toolbar: 5/15/20/24/30 target FPS; Fast/Balanced/Sharp resolution/quality; Fit/Actual size/Stretch; full screen (F11, Esc exits); input toggle; Files; admin/input-block requests. **Ctrl+Alt+F12 releases remote keyboard control.**
+5. Use Settings for the TCP port, availability, Host permission policy, shared folder and opt-in password-assisted automatic approval.
 
-Numeric IDs resolve through signed UDP discovery **on the LAN only**. They are not Internet-routable AnyDesk accounts. There is no deployed registry/signaling/relay server. Broadcast discovery cannot cross routed subnets, isolated Wi-Fi clients, or most VPNs. See [network setup](docs/Discovery.md).
+Numeric discovery is **LAN-only**, not an Internet AnyDesk service. No registry/ICE/TURN/relay is deployed. UDP broadcast does not normally cross VLANs, routers, isolated Wi-Fi or most VPNs. Default TCP 45831 is configurable; UDP discovery is 45832. See [Discovery](docs/Discovery.md) and `run/README.md`.
 
-## What changed from v0.1
+## Implemented
 
-- Persistent, formatted numeric IDs derived from device public keys; signed, nonce-bound LAN discovery resolves address and full TLS pin automatically.
-- Advanced manual IP/full-fingerprint connection retained for networks that block discovery.
-- Actual GDI primary-display capture, JPEG encoding, bounded encrypted transport and WPF rendering.
-- Explicit screen consent and directional capability enforcement: only the approved Host can send frames.
-- Backpressure, latest-frame rendering, paused/unavailable states and immediate image clearing on disconnect.
-- End-to-end Windows UI test drives numeric discovery → TLS approval → actual desktop capture → JPEG transfer → visible decoded image → disconnect.
+- Persistent CNG RSA-3072 identity, signed nonce-bound ID discovery, pinned mutual TLS 1.2/1.3.
+- Independent full-size remote session tabs and a compact connection/settings workspace.
+- Primary-display GDI capture with **native downscaling before WIC**, binary JPEG frames (no base64 media), latest-frame-only background decoding, no old-frame backlog, frame pacing rather than a fixed 250-ms wait. Inactive tabs request 2 FPS and skip decoding. Actual receive FPS is displayed; target FPS is not a performance guarantee.
+- Explicit mouse/keyboard grant, coordinate mapping for display modes, bounded dedicated Windows input thread and release of remote-held keys on focus loss/disconnect. Ordinary interactive desktop only; Windows UIPI/UAC restrictions remain.
+- Files permission, sandboxed shared-folder browser, download/upload, acknowledged 32-KiB chunks, persistent cross-session resume, prefix validation for upload resume, final SHA-256, destination-volume staging and rename without overwrite. Max 8 GiB/file, 16 partial uploads / 16 GiB cache.
+- Session animation-disable option only with its own Host grant; normal cleanup restores previous values.
+- Admin restart request: disabled by default, explicit local Host confirmation and the **normal UAC prompt**, closes current process sessions and requires reconnect. No bypass, service install or background persistence.
+- Physical-input blocking request: disabled by default, fresh local consent, **mouse AND keyboard**, dedicated injection thread, maximum 30 seconds; Ctrl+Alt+Del, expiry, disconnect or process/thread exit releases it. Windows may refuse without elevation. Native behavior requires manual validation.
+- Password-assisted automatic approval only for **previously explicitly trusted Controller full keys**, opt-in and app-open only. 16+ character password, PBKDF2-SHA256 600,000 iterations, DPAPI-protected verifier, no saved plaintext/client password; 3 failed attempts cause a 60-second cooldown. First-contact numeric passwords are refused until a Host pin exists. Auto input/files grants are separate, off by default.
 
-## Current limits
+## Limits — do not confuse this with a finished AnyDesk replacement
 
-View only: no mouse/keyboard control, clipboard, files, unattended access, UAC/Secure Desktop support, sound, multi-monitor switching or Internet relay. Capture is a compatibility-first GDI/JPEG baseline, **not H.264/WebRTC**: primary monitor, at most 1440×900, quality adjusted to stay under 256 KiB, at most about 4 FPS (slower on slow hosts/links). Protected content, locked desktops and HDR can appear black or stale; no bypass is attempted. This is not yet a low-latency video/remote-control release.
+JPEG/TCP is a much better-paced baseline, **not hardware H.264/WebRTC**. Smoothness depends on capture/encoding/GPU/network/other sessions; 30 FPS is a cap/target, not a measured physical-LAN promise. Primary display only; locked/protected/UAC/HDR desktops can be black/stale/unavailable. Some Windows-key combinations stay local; Ctrl+Alt+Del cannot be remotely injected. No clipboard sync, audio, multi-monitor selector, remote Windows login, automatic reconnect/job scheduler, actual SMB share/mapped drive, account backend, Internet relay or privileged service.
 
-IDs are **addresses, not passwords or globally allocated unique numbers**. First-contact discovery is not a central trust authority. For hostile networks, verify the full fingerprint using Advanced setup and a trusted channel. Saved verified keys are pinned on subsequent ID connections. See [Security](docs/Security.md).
+A shared folder is browsed **inside RemoteDesk**, not mounted as a Windows network drive. Resume means reconnect (with fresh consent/password policy), choose the same source or destination, and continue verified partial data; it does not silently authorize a new session. Files are never executed or overwritten by the transfer service.
 
-## Build / test
-
-.NET 10 LTS SDK, Windows x64:
+## Build / verification
 
 ```powershell
 dotnet build RemoteDesk.sln -c Release
-dotnet run --project tests/RemoteDesk.Core.Tests -c Release --no-build
-dotnet run --project tests/RemoteDesk.Protocol.Tests -c Release --no-build
-dotnet run --project tests/RemoteDesk.Security.Tests -c Release --no-build
-dotnet run --project tests/RemoteDesk.Desktop.Tests -c Release --no-build -- artifacts/workspace.png
+foreach ($suite in @('Core','Protocol','Security','Desktop')) {
+  dotnet run --project "tests/RemoteDesk.$suite.Tests" -c Release --no-build
+}
 powershell -ExecutionPolicy Bypass -File scripts/Build.ps1
 ```
 
-Tests are console executables, not `dotnet test` adapters. Security tests use real TLS and UDP. Desktop tests use real Windows capture/encoding and an isolated auto-approving **test Host**; production approval is not bypassed. A CI end-to-end test is not a substitute for acceptance on two physical Windows PCs.
+Console suites, not `dotnet test` adapters. Tests cover actual TLS/binary frames, input permission, path sandbox, interrupted/resumed uploads and downloads, hashes, numeric discovery, DPAPI/PBKDF2 verifier and Windows UI multi-tab independent sessions with the **production Host runtime**. CI deliberately does **not** physically block a runner's keyboard or approve UAC; those are manual release gates. See `run/BUILD-INFO.md`, `run/Performance.txt` (when generated), [Acceptance](docs/Acceptance.md), [Security](docs/Security.md), [Files](docs/FileTransfer.md), [Performance](docs/Performance.md).
 
-Projects: Desktop, Agent, Core, Protocol, Security, Transport, **Discovery**, **Capture**. Core/transport remain independent of WPF/capture. The capture library is Windows-specific.
-
-Build provenance and pending manual gates: `run/BUILD-INFO.md`, [Acceptance](docs/Acceptance.md). Target baseline: updated Windows 11 x64 24H2/25H2; physical OS/GPU/DPI certification pending. Windows 10/ESU, Server and ARM64 require independent validation. Builds are unsigned. Existing [LICENSE](LICENSE) applies.
+Modules: Core, Protocol, Security, Transport, Agent, Discovery, Capture, **Files**, **Windows**, Desktop. Intended baseline: updated Windows 11 x64, .NET 10 LTS. Physical OS/GPU/DPI/security certification pending. Unsigned development builds; existing [LICENSE](LICENSE) applies.

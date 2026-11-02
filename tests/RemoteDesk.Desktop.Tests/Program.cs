@@ -81,6 +81,11 @@ internal static class Program
         ((Button)window.FindName("ConnectButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         await Until(() => window.ActiveViews.Count == 1 && Image(window.ActiveViews[0]).Source is BitmapSource);
         var first = window.ActiveViews[0];
+        await using (var profile = new SessionView(first.Session, 30, 960))
+        {
+            if (((ComboBox)profile.FindName("QualityBox")).SelectedIndex != 0 || ((ComboBoxItem)((ComboBox)profile.FindName("FpsBox")).SelectedItem).Content.ToString() != "30")
+                throw new Exception("Saved FPS/width defaults did not initialize the session profile.");
+        }
         workspace.SelectedItem = window.FindName("ConnectionCenterTab");
         ((CheckBox)window.FindName("ManualCheck")).IsChecked = true;
         ((TextBox)window.FindName("AddressBox")).Text = "127.0.0.1";

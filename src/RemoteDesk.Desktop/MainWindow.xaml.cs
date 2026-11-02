@@ -212,7 +212,7 @@ public partial class MainWindow : Window
     private void CancelConnect_Click(object sender, RoutedEventArgs e) => _connection?.Cancel();
     private void AttachSession(SecureSession session, bool owned)
     {
-        var view = new SessionView(session, _settings.DefaultFps);
+        var view = new SessionView(session, _settings.DefaultFps, _settings.DefaultWidth);
         var header = new StackPanel { Orientation = Orientation.Horizontal };
         header.Children.Add(new TextBlock { Text = (owned ? "▣ " : "↙ ") + NumericDeviceId.Format(NumericDeviceId.FromFingerprint(session.PeerId)), VerticalAlignment = VerticalAlignment.Center });
         var close = new Button { Content = "×", Padding = new Thickness(5, 0, 5, 0), Margin = new Thickness(10, 0, 0, 0), Background = Brushes.Transparent, ToolTip = "Disconnect this device" };

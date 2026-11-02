@@ -1,4 +1,4 @@
-# Numeric ID discovery (v0.2)
+# Numeric ID discovery (workspace 0.3)
 
 ## Scope
 
@@ -18,8 +18,8 @@ First-contact discovery is **self-asserted key discovery**, not a PKI. Twelve de
 
 ## Network requirements
 
-Private LAN inbound TCP 45831 and UDP 45832 for the app, LocalSubnet scope. `scripts/Enable-LanFirewall.ps1` is an optional explicit admin action; the app never elevates or modifies rules. Firewalls can permit TCP while blocking UDP: that explains manual connectivity working while ID discovery fails. Broadcast cannot normally cross routers, VLANs, client-isolated Wi-Fi or VPN boundaries. There is no silent fallback to an insecure connection.
+Private LAN inbound configured TCP port (default 45831) and UDP 45832 for the app, LocalSubnet scope. `scripts/Enable-LanFirewall.ps1` is an optional explicit admin action; the app never elevates or modifies rules. Firewalls can permit TCP while blocking UDP: that explains manual connectivity working while ID discovery fails. Broadcast cannot normally cross routers, VLANs, client-isolated Wi-Fi or VPN boundaries. There is no silent fallback to an insecure connection.
 
 ## Internet phase
 
-Needs an actually deployed authenticated device registry, globally collision-free ID allocation/lookup, authenticated signaling, endpoint key binding and direct connectivity negotiation with an encrypted relay fallback. No service URL is hardcoded and no ID-to-public-IP promise is made in v0.2. Merely inventing a local number cannot make an endpoint reachable across NAT/firewalls.
+Needs an actually deployed authenticated device registry, globally collision-free ID allocation/lookup, authenticated signaling, endpoint key binding and direct connectivity negotiation with an encrypted relay fallback. No service URL is hardcoded and no ID-to-public-IP promise is made in 0.3. Merely inventing a local number cannot make an endpoint reachable across NAT/firewalls.

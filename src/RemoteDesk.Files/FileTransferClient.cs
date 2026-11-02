@@ -40,7 +40,11 @@ public static class FileTransferClient
         if (File.Exists(metadata) && await File.ReadAllTextAsync(metadata, token) != identity) throw new IOException("A different partial download uses that filename.");
         if (File.Exists(part) && (File.GetAttributes(part) & FileAttributes.ReparsePoint) != 0) throw new IOException("Linked partial paths are not permitted.");
         if (File.Exists(metadata) && (File.GetAttributes(metadata) & FileAttributes.ReparsePoint) != 0) throw new IOException("Linked metadata is not permitted.");
-        if (!File.Exists(metadata)) { await File.WriteAllTextAsync(metadata, identity, token); if (File.Exists(part)) throw new IOException("An unrecognized partial file exists. Remove it locally before retrying."); }
+        if (!File.Exists(metadata))
+        {
+            if (File.Exists(part)) throw new IOException("An unrecognized partial file exists. Remove it locally before retrying.");
+            await File.WriteAllTextAsync(metadata, identity, token);
+        }
         await using (var output = new FileStream(part, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None, 32768, true))
         {
             if (output.Length > info.Length) throw new IOException("Invalid partial size.");

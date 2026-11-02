@@ -31,10 +31,11 @@ public partial class SessionView : UserControl, IAsyncDisposable
     private DateTimeOffset _lastFrame = DateTimeOffset.UtcNow;
     private CancellationTokenSource? _transfer;
     private string _directory = "";
-    public SessionView(SecureSession session, int defaultFps)
+    public SessionView(SecureSession session, int defaultFps, int defaultWidth = 1440)
     {
         Session = session; _lifetime = _stop.Token; InitializeComponent();
         int[] rates = [5, 15, 20, 24, 30]; FpsBox.SelectedIndex = Math.Max(0, Array.IndexOf(rates, defaultFps));
+        QualityBox.SelectedIndex = defaultWidth <= 960 ? 0 : defaultWidth >= 1920 ? 2 : 1;
         FilesButton.IsEnabled = !session.IsHost && session.Permissions.FileAccess;
         AdminButton.IsEnabled = LockButton.IsEnabled = ControlCheck.IsEnabled = !session.IsHost && session.Permissions.ControlInput;
         AnimationsCheck.IsEnabled = !session.IsHost && session.Permissions.DesktopEffects;

@@ -1,28 +1,31 @@
-# LAN protocol v2 — consent + primary display
+# LAN protocol v3
 
-**Both endpoints must update.** Version 1 (heartbeat only) is rejected. Framing remains 4-byte signed big-endian length followed by strict UTF-8 JSON, over mutually authenticated TLS 1.2/1.3. No plaintext fallback.
+Both peers must update. Version 1/2 deliberately fail. Mutual pinned TLS 1.2/1.3 remains mandatory.
 
-Envelope: required `version`, `messageId` UUID, `sessionId` UUID, positive per-direction `sequence`, string `type`, object `payload`. Case-sensitive fields, no unknown or duplicate JSON members, depth ≤8. Payload properties: optional `deviceId`, `displayName`, `viewScreen` boolean (default false), `jpeg` byte array encoded as base64.
+## Framing
 
-Limits: total JSON frame 2–393,216 bytes; JPEG ≤262,144 bytes; JPEG encoded dimensions 1–1600 by 1–1000. Header validation precedes native decoding. Only 8-bit SOF0/SOF1/SOF2 JPEG dimensions are accepted. The capture implementation emits at most 1440×900. Truncated/invalid frames close the session. Strict sequence/session checks and unique message IDs are maintained for up to 100,000 messages per direction; reaching the bound closes the session and requires fresh approval. No unbounded replay cache.
+Four-byte signed big-endian payload length, 2–786432 bytes, validated before allocation. Two bodies:
 
-## Handshake
+- Control: strict UTF-8 JSON envelope; required version=3, messageId UUID, sessionId UUID, positive per-direction sequence, string type, object payload. Case-sensitive, no unknown/duplicate members, depth ≤8.
+- Screen: `RDV3` magic (4), session UUID bytes (16), big-endian Int64 sequence (8), message UUID bytes (16), then raw JPEG. Total header 44 bytes. No base64 conversion/JSON media expansion.
 
-1. Controller pins the full Host SPKI, obtained through signed local discovery or independently verified Advanced setup. Host requires a client certificate (proof of possession, not authorization).
-2. Controller sends `ConnectionRequest` sequence 1 with its TLS-bound device ID, unverified display name, and `viewScreen` request. Client certificates and payload identities must match.
-3. Host prompts its local user, explicitly showing the requested **view primary display** permission. No media producer is started before approval. Consent expires in 45 seconds, default deny.
-4. Host sends `Approval` or `Rejection`, sequence 1. Approval echoes the granted view-screen flag; rejection has no capabilities and closes. Controller rejects unsolicited screen grants.
-5. Only the approved Host may send `ScreenFrame` / `ScreenUnavailable`, and only the requesting Controller may receive them. A controller sending screen data, or any sender without a grant, is rejected. No input/file/clipboard message types exist.
+Screen size ≤512 KiB; encoded dimensions 1–1920 × 1–1200, 8-bit JPEG headers validated before decoding. Strict sequence/session/unique ID checks apply to both body formats. Bound: 1,000,000 accepted IDs per direction, then fresh authorization required. The replay set is bounded but long multi-session runs still require measured memory acceptance.
 
-A six-digit session reference derives from the fresh session UUID and both full device fingerprints. It supports human correlation, **not independent authentication**; its inputs are not TLS exporter secrets and a malicious peer controls its own session/identity. Do not replace trusted full-key verification with this short code on a hostile network.
+## Consent
 
-## Connected messages
+ConnectionRequest sends TLS-bound device ID, unverified name and requested view/input/files/effects flags. Optional password ≤256 chars stays inside pinned TLS and is never logged. Host requires a client key, then returns a permitted subset in Approval or sends Rejection. Password-based authorization is an application policy, restricted to known trusted Controller keys; it is not a protocol bypass or new cryptography. A short session reference remains a public-identity/UUID correlation hint, not a PAKE/MITM substitute.
 
-- `Ping` / `Pong`: empty payload, periodic 3-second heartbeat.
-- `Disconnect`: empty payload, closes the session.
-- `ScreenFrame`: only nonempty `jpeg` payload; no extra name, device ID or grant flags.
-- `ScreenUnavailable`: empty payload; Controller clears its image and explains the failure.
+Connected types: Ping/Pong, Disconnect, ScreenFrame/ScreenUnavailable, Input, Command, Reply. Only the granted Host sends media; only the granted Controller sends Input or initiates RPC. No remote shell, arbitrary execution, delete, clipboard or service-install messages.
 
-Writes share one semaphore and a five-second deadline; frames cannot interleave. Screen capture **awaits the send** before taking another frame, then waits 250 ms. No unbounded producer queue. The renderer retains only the latest received JPEG and decodes on a 125-ms UI tick; excess intermediate frames are replaced. A frame-less UI shows waiting/unavailable/stale status instead of equating transport connectivity with working video. Disconnect clears the image and cancels/disposes the capture producer before releasing transport resources.
+Input: validated kind Move/Button/Wheel/Key/ReleaseAll, normalized primary-display x/y 0..65535, VK 1..254, mouse button 1..5, wheel bounded ±1200. Host injects via one bounded Windows thread; it does not spoof Secure Attention Sequence.
 
-Read deadline 12 seconds, initial dial/TLS/request deadline 10 seconds, Controller approval wait 60 seconds. Media and heartbeat share TLS/TCP; head-of-line blocking and JPEG bandwidth are known baseline limitations. H.264/WebRTC needs a later media transport design, not a claim made by this protocol.
+Command/Reply: unique request UUID, operation, bounded path/data/range/hash/entries. File chunks ≤32768 bytes, file ranges ≤8 GiB, directory listing ≤256 entries; names cannot contain control characters/path separators/ADS colon. Up to 16 in-flight RPC promises and 32 queued commands. Unknown permission/operation fails safely, not elevated. Reply IDs/opcodes are matched.
+
+Operations:
+- SetStream: 1..30 FPS, width 640..1920, JPEG quality 20..85; disabling animations additionally needs Effects.
+- ListFiles, ReadInfo, ReadChunk, WriteBegin, WriteChunk, WriteComplete: need Files; paths are independently sandboxed by Host.
+- RequestAdmin, RequestInputLock: need Control, enabled Host policy, and fresh local confirmation. They cannot remotely approve UAC or persist an input block.
+
+Serialized writes have 5-second deadlines. Media skips a busy writer rather than backlog. Read deadline 12 seconds, heartbeat every 3 seconds, dial/TLS 10 seconds, initial approval 45 seconds (Controller wait 60). RPC timeout normally 120 seconds; large hashing/commit operations up to 600 seconds, without blocking heartbeat/media receive. UI transfer pause stops scheduling chunks; it does not revoke an already received disk operation. Disconnect cancels all workers, pending requests and input ownership.
+
+Resume wire contract and failure handling: see FileTransfer.md. This remains TLS/TCP with head-of-line blocking, not a claim of hardware video transport.

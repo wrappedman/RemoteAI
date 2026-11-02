@@ -6,12 +6,13 @@ namespace RemoteDesk.Windows;
 /// <summary>One dedicated thread owns injection and any short, explicitly consented physical-input block.</summary>
 public sealed class InputController : IDisposable
 {
-    private sealed record Work(InputEvent? Input, TaskCompletionSource<bool>? Lock);
+    private sealed record Work(InputEvent? Input, TaskCompletionSource<bool>? Lock, long ExpiresAt = 0);
     private readonly BlockingCollection<Work> _queue = new(256);
     private readonly Thread _thread;
     private readonly HashSet<int> _keys = [];
     private readonly HashSet<int> _buttons = [];
     private int _disposed;
+    private long _lastStatus;
     public event Action<string>? Status;
     public InputController()
     {
@@ -20,14 +21,14 @@ public sealed class InputController : IDisposable
     public void Post(InputEvent input)
     {
         if (Volatile.Read(ref _disposed) != 0) return;
-        try { if (!_queue.TryAdd(new(input, null))) Status?.Invoke("Input queue full; release control and retry."); }
+        try { if (!_queue.TryAdd(new(input, null))) NotifyStatus("Input queue full; release control and retry."); }
         catch (InvalidOperationException) { }
     }
     public async Task<bool> BlockPhysicalInputFor30SecondsAsync()
     {
         if (Volatile.Read(ref _disposed) != 0) return false;
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        try { if (!_queue.TryAdd(new(null, completion))) return false; }
+        try { if (!_queue.TryAdd(new(null, completion, Environment.TickCount64 + 2500))) return false; }
         catch (InvalidOperationException) { return false; }
         return await completion.Task.WaitAsync(TimeSpan.FromSeconds(3));
     }
@@ -39,11 +40,12 @@ public sealed class InputController : IDisposable
             while (Volatile.Read(ref _disposed) == 0 && !_queue.IsCompleted)
             {
                 if (unlockAt != 0 && Environment.TickCount64 >= unlockAt)
-                { _ = BlockInput(false); unlockAt = 0; Status?.Invoke("Physical input block expired (30 seconds maximum)."); }
+                { _ = BlockInput(false); unlockAt = 0; NotifyStatus("Physical input block expired (30 seconds maximum)."); }
                 if (!_queue.TryTake(out var work, 25)) continue;
                 if (work.Lock is not null)
                 {
-                    bool ok = unlockAt == 0 && BlockInput(true);
+                    // Never execute a delayed block after its caller has timed out.
+                    bool ok = Environment.TickCount64 < work.ExpiresAt && unlockAt == 0 && BlockInput(true);
                     if (ok) unlockAt = Environment.TickCount64 + 30000;
                     work.Lock.TrySetResult(ok); continue;
                 }
@@ -88,9 +90,16 @@ public sealed class InputController : IDisposable
         }
         _keys.Clear(); _buttons.Clear();
     }
+    private void NotifyStatus(string text)
+    {
+        long now = Environment.TickCount64;
+        // A refused stream of input must not flood the Host UI dispatcher.
+        if (now - Interlocked.Read(ref _lastStatus) < 1000) return;
+        Interlocked.Exchange(ref _lastStatus, now); Status?.Invoke(text);
+    }
     private void Send(INPUT input)
     {
-        if (SendInput(1, [input], Marshal.SizeOf<INPUT>()) != 1) Status?.Invoke("Windows blocked input (UIPI/UAC, secure desktop or session boundary).");
+        if (SendInput(1, [input], Marshal.SizeOf<INPUT>()) != 1) NotifyStatus("Windows blocked input (UIPI/UAC, secure desktop or session boundary).");
     }
     public void Dispose()
     {

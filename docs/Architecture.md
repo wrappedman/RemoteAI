@@ -1,25 +1,27 @@
-# RemoteDesk architecture v0.2
+# Architecture — workspace 0.3
 
 ```
-Desktop (visible WPF app, current Windows user)
- ├─ Discovery → Security: signed numeric ID lookup / LAN UDP
- ├─ Agent → Transport → Protocol + Core + Security
- └─ Capture (Host only) → bounded JPEG frames → Transport/TLS → Controller renderer
+MainWindow: connection center + settings + independent session tabs (max 8 outgoing / 1 incoming)
+  SessionView (Controller): viewport/input routing + profile toolbar + virtual file browser
+  HostSessionRuntime: granted input worker + capture producer + shared-folder handler + effects lease
+  Settings: current-user policy, trusted keys and DPAPI-protected password verifier
+  Discovery → Security: nonce-signed public LAN ID lookup, full-key pin for TLS
+  Agent → Transport → Protocol + Core + Security
+  Capture (Windows): native GDI scaling → JPEG → binary TLS media
+  Files: sandbox, bounded chunks, partial cache, resume/hash/verified commit
+  Windows: bounded dedicated SendInput/BlockInput thread, animation flags, DPAPI verifier
 ```
 
-Every app can initiate or receive one attended session. Availability starts while the visible app runs and can be disabled. There is no Windows Service, background unattended agent, backend account service or Internet relay. Desktop owns consent, visible lifecycle and rendering; Transport owns authenticated framing, capability checks, heartbeat, cancellation and media-producer lifetime. Neither Transport nor Core references WPF/capture.
+Core/Transport/Files do not depend on WPF. Discovery is still LAN-only and advertises the selected TCP port. UDP stays 45832. Host remains one active incoming Controller, but can simultaneously have independent outgoing sessions. MainWindow no longer has a single global active session/image. Each session owns its viewport, pending RPCs, decoder queue, input focus, transfer cancellation and lifetime. The core Disconnected→Connecting→Authenticating→WaitingForApproval→Connected lifecycle describes channel setup; live video status requires decoded frames.
 
-New modules:
+Protocol v3 negotiates a subset of requested ViewScreen, ControlInput, FileAccess and DesktopEffects permissions. No implicit input grant from screen consent. The Host command worker is bounded (32), correlation requests are bounded (16), input queue is bounded (256), media decoder queue is one latest frame. Receive/heartbeat are independent of potentially slow file hashing. Files/admin/input-block requests are authorized by capability before dispatch. Native input/BlockInput share one dedicated thread; remote-owned keys are released on focus loss, session end and thread cleanup.
 
-- **Discovery:** persistent twelve-digit IDs from device SPKI; nonce-bound RSA-signed UDP replies, three-second lookup, full-key pinning for TLS. See Discovery.md.
-- **Capture:** Windows-only GDI BitBlt primary display capture in the current user session, cached DC/bitmap handles recreated on resolution changes, WPF JPEG encoding, bounded dimensions/size and deterministic cleanup. No privileged access or Secure Desktop workaround.
+Media has a distinct binary envelope inside TLS, not base64 JSON. Native scaling occurs before WPF/WIC to avoid cloning full 4K bitmaps. Frame pacing subtracts capture/encode/send time from the selected period; busy media writes are dropped instead of queueing behind control/files. Decoding is off the UI thread, bitmaps are frozen, and a selected tab renders the latest frame; hidden tabs request 2 FPS and skip decoding. This is a lower-latency JPEG baseline, not the future GPU/H.264/WebRTC architecture.
 
-This is intentionally a compatibility-first **view-only GDI/JPEG baseline**. It is not the eventual DXGI/Windows Graphics Capture + H.264 + WebRTC low-latency engine. One capture loop per approved Host, awaiting each write, max about four frames/sec. UI keeps only the latest received image and distinguishes secure-channel-ready, waiting-for-screen, viewing, paused and unavailable.
+Settings are current-user JSON with atomic replace. Password verifier is salted PBKDF2-SHA256 600k wrapped by current-user Windows DPAPI; no plaintext credential persistence. Automatic approval is opt-in, current visible app only, restricted to explicitly trusted Controller full keys; optional auto-input/files policies remain separate. Controller refuses first-contact numeric password transmission without a prior pinned Host. Failed password attempts have a global cooldown.
 
-The underlying legal lifecycle is unchanged: Disconnected → Connecting → Authenticating → WaitingForApproval → Connected → Disconnecting → Disconnected; cancellation can terminate any intermediate state. “Connected” in the core means transport readiness only. Displayed “Viewing remote desktop” requires a decoded frame.
+UAC requests require explicit Host confirmation, normal Windows elevation and process restart/reconnect. No service, security-boundary bypass or silent elevation. Physical blocking is an additional, fresh Host action, at most 30 seconds, both mouse/keyboard, local Ctrl+Alt+Del recovery. Desktop animation changes have separate consent and a normal-cleanup restoration lease. See Security/Acceptance for manual native-feature release gates.
 
-Identity remains user-scoped, non-exportable RSA-3072 CNG, CurrentUser certificate store, full SHA-256 SPKI pin. Numeric IDs are discoverable addresses, not secrets/global allocations. Consent explicitly grants primary-screen viewing; keyboard/mouse/file/clipboard capabilities are absent. Saved v2 targets persist a public full-key pin after successful attended connection; old manual-target settings are not migrated or overwritten.
+SharedFolderService exposes a virtual file root, not SMB. It rejects traversal/absolute paths, links/reparse points, reserved Windows names and internal staging paths. Upload parts are content/peer-key scoped outside the shared root; full verification precedes destination-volume staging + rename without overwrite. No command executes transferred files. Resume across a fresh TLS session requires that session's authorization.
 
-Session owns TCP/TLS, background receive/heartbeat tasks and any registered screen producer. Closing cancels the producer, closes sockets, waits for producer cleanup, then disposes synchronization primitives. Capture does not save images. The desktop renderer clears all images on disconnect. Logs exclude image bytes, full keys, session codes and private material, and remain capped at 100 in-memory entries.
-
-Future Internet architecture still requires a deployed authenticated registry, signaling distinct from media relay, ICE/STUN/TURN, endpoint key/fingerprint binding, and relay-blind end-to-end encryption. A local number alone cannot traverse NAT. See Roadmap.md for remaining phases.
+Internet still requires a real authenticated registry/ID allocation, signaling, key binding, ICE/STUN/TURN and encrypted relay deployment. A local numeric address alone does not cross NAT.
