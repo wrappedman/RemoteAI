@@ -280,6 +280,9 @@ public partial class MainWindow : Window
         if (_session is not null) await _session.DisconnectAsync();
         if (_agent is not null) await _agent.DisposeAsync();
         _identity?.Dispose(); _operation?.Dispose();
-        _canClose = true; Close();
+        _canClose = true;
+        // With no active session all awaits above may complete synchronously. Never
+        // recursively call Close from inside the original WPF Closing event.
+        Dispatcher.BeginInvoke(new Action(Close));
     }
 }

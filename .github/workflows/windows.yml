@@ -63,6 +63,7 @@ jobs:
           path: artifacts/run/
           retention-days: 14
       - name: Save verified deliverables to the session branch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/arena/3ab7c5f0-remoteai'
         shell: pwsh
         run: |
           Copy-Item artifacts/run/* run/ -Force

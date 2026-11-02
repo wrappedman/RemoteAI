@@ -44,11 +44,18 @@ internal static class Program
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
                 using (var file = File.Create(path)) encoder.Save(file);
                 Console.WriteLine("PASS: real English WPF workspace, CNG initialization, disconnected/default-off state; rendered screenshot saved.");
-                window.Close(); app.Shutdown(0);
+                window.Closed += (_, _) => app.Shutdown(0);
+                window.Close();
             }
             catch (Exception ex)
             {
-                timer.Stop(); Console.Error.WriteLine(ex); app.MainWindow?.Close(); app.Shutdown(1);
+                timer.Stop(); Console.Error.WriteLine(ex);
+                if (app.MainWindow is { } failedWindow)
+                {
+                    failedWindow.Closed += (_, _) => app.Shutdown(1);
+                    failedWindow.Close();
+                }
+                else app.Shutdown(1);
             }
         };
         timer.Start();

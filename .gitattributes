@@ -1,0 +1,4 @@
+* text=auto
+# Preserve published bytes exactly, including runtime JSON and checksum files.
+/run/** -text
+/run/README.md text eol=lf
