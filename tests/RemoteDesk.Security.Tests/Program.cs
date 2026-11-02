@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using RemoteDesk.Agent;
+using RemoteDesk.Discovery;
 using RemoteDesk.Security;
 using RemoteDesk.Transport;
 
@@ -35,10 +36,19 @@ await using var agent = new LanAgent(host)
 };
 agent.Start(0, IPAddress.Loopback);
 var port = agent.Port;
-await using (var client = await SecureSession.ConnectAsync("127.0.0.1", port, host.DeviceId, "Controller", controller, _ => { }, deadline.Token))
+await using (var client = await SecureSession.ConnectAsync("127.0.0.1", port, host.DeviceId, "Controller", controller, _ => { }, deadline.Token, requestScreen: true))
 {
     client.Start(); var server = await established.Task.WaitAsync(deadline.Token);
     Check(approvals == 1 && server.PeerId == controller.DeviceId, "Approval and identities");
+    Check(client.CanReceiveScreen && !client.CanSendScreen && server.CanSendScreen && !server.CanReceiveScreen, "Directional screen permission");
+    Check(client.VerificationCode == server.VerificationCode, "Pairing code bound to both keys/session");
+    var frame = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+    client.ScreenReceived += jpeg => frame.TrySetResult(jpeg);
+    byte[] sample = await File.ReadAllBytesAsync(Path.Combine(AppContext.BaseDirectory, "screen.jpg"));
+    await server.SendScreenAsync(sample, deadline.Token);
+    Check((await frame.Task.WaitAsync(TimeSpan.FromSeconds(5))).SequenceEqual(sample), "Encrypted screen frame roundtrip");
+    try { await client.SendScreenAsync(sample, deadline.Token); throw new Exception("Controller sent unauthorized screen"); }
+    catch (UnauthorizedAccessException) { }
     await Task.Delay(3500, deadline.Token);
     Check(!client.Completion.IsCompleted, "Heartbeat keeps session alive");
     await client.DisconnectAsync();
@@ -105,3 +115,22 @@ await using (var afterCancel = await SecureSession.ConnectAsync("127.0.0.1", can
 }
 Console.WriteLine("PASS: Host cancels an incomplete TLS handshake; listener remains usable");
 Console.WriteLine("PASS: mTLS, pin mismatch, key binding, attended approval/rejection, heartbeat, orderly disconnect, approval cancellation, Agent restart, abrupt transport loss");
+
+string numeric = NumericDeviceId.FromFingerprint(host.DeviceId);
+Check(numeric.Length == 12 && numeric.All(char.IsAsciiDigit), "Numeric ID shape");
+Check(NumericDeviceId.Normalize(NumericDeviceId.Format(numeric)) == numeric, "Formatted ID roundtrip");
+var query = new DiscoveryQuery(1, Guid.NewGuid(), numeric);
+var reply = DiscoveryProtocol.Sign(host, query, "Test Host", 45831);
+Check(DiscoveryProtocol.Verify(reply, query, IPAddress.Loopback).Fingerprint == host.DeviceId, "Signed discovery");
+try { DiscoveryProtocol.Verify(reply, query with { Nonce = Guid.NewGuid() }, IPAddress.Loopback); throw new Exception("Replayed discovery accepted"); }
+catch (InvalidDataException) { }
+byte[] tampered = (byte[])reply.Signature.Clone(); tampered[0] ^= 1;
+try { DiscoveryProtocol.Verify(reply with { Signature = tampered }, query, IPAddress.Loopback); throw new Exception("Forged discovery accepted"); }
+catch (InvalidDataException) { }
+await using (var discovery = new LanDiscovery(host, 45831, "Test Host", 0, IPAddress.Loopback))
+{
+    discovery.Start();
+    var found = await LanDiscovery.ResolveAsync(numeric, deadline.Token, [new IPEndPoint(IPAddress.Loopback, discovery.BoundPort)]);
+    Check(found.Fingerprint == host.DeviceId && found.Port == 45831, "Numeric ID resolves without manual IP");
+}
+Console.WriteLine("PASS: screen permissions, encrypted JPEG transport, matching pairing code, numeric ID, discovery signatures/nonces and real UDP resolution");

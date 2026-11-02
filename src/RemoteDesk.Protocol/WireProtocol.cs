@@ -4,8 +4,8 @@ using System.Text.Json.Serialization;
 
 namespace RemoteDesk.Protocol;
 
-public enum MessageType { ConnectionRequest, Approval, Rejection, Ping, Pong, Disconnect }
-public sealed record Payload(string? DeviceId = null, string? DisplayName = null);
+public enum MessageType { ConnectionRequest, Approval, Rejection, Ping, Pong, Disconnect, ScreenFrame, ScreenUnavailable }
+public sealed record Payload(string? DeviceId = null, string? DisplayName = null, bool ViewScreen = false, byte[]? Jpeg = null);
 public sealed record Envelope(
     [property: JsonRequired] int Version,
     [property: JsonRequired] Guid MessageId,
@@ -16,9 +16,10 @@ public sealed record Envelope(
 
 public static class WireProtocol
 {
-    public const int Version = 1;
-    public const int MaxFrameBytes = 16 * 1024;
-    public const int MaxMessagesPerSession = 10000;
+    public const int Version = 2;
+    public const int MaxFrameBytes = 384 * 1024;
+    public const int MaxJpegBytes = 256 * 1024;
+    public const int MaxMessagesPerSession = 100000;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -37,14 +38,22 @@ public static class WireProtocol
         if (message.Version != Version || message.MessageId == Guid.Empty || message.SessionId == Guid.Empty ||
             message.Sequence < 1 || message.Payload is null || !Enum.IsDefined(message.Type))
             throw new InvalidDataException("Invalid protocol envelope.");
+        var payload = message.Payload;
         if (message.Type == MessageType.ConnectionRequest)
         {
-            if (message.Payload.DeviceId is not { Length: 64 } id || !id.All(Uri.IsHexDigit) ||
-                string.IsNullOrWhiteSpace(message.Payload.DisplayName) || message.Payload.DisplayName.Length > 64 ||
-                message.Payload.DisplayName.Any(char.IsControl))
+            if (payload.DeviceId is not { Length: 64 } id || !id.All(Uri.IsHexDigit) ||
+                string.IsNullOrWhiteSpace(payload.DisplayName) || payload.DisplayName.Length > 64 ||
+                payload.DisplayName.Any(char.IsControl) || payload.Jpeg is not null)
                 throw new InvalidDataException("Invalid connection request.");
         }
-        else if (message.Payload.DeviceId is not null || message.Payload.DisplayName is not null)
+        else if (message.Type == MessageType.ScreenFrame)
+        {
+            if (payload.DeviceId is not null || payload.DisplayName is not null || payload.ViewScreen || payload.Jpeg is null)
+                throw new InvalidDataException("Invalid screen payload.");
+            JpegFrame.Validate(payload.Jpeg);
+        }
+        else if (payload.DeviceId is not null || payload.DisplayName is not null || payload.Jpeg is not null ||
+                 (payload.ViewScreen && message.Type != MessageType.Approval))
             throw new InvalidDataException("Unexpected message payload.");
     }
 

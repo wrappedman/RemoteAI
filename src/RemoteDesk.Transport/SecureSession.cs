@@ -22,6 +22,13 @@ public sealed class SecureSession : IAsyncDisposable
     private int _closed;
     private Task? _receiveTask;
     private Task? _heartbeatTask;
+    private Task? _producerTask;
+    private int _producerStarted;
+    public bool CanSendScreen { get; }
+    public bool CanReceiveScreen { get; }
+    public string VerificationCode { get; }
+    public event Action<byte[]>? ScreenReceived;
+    public event Action? ScreenUnavailable;
     public string PeerId { get; }
     public string PeerName { get; }
     public string Cipher => $"{_stream.SslProtocol} / {_stream.NegotiatedCipherSuite}";
@@ -30,13 +37,14 @@ public sealed class SecureSession : IAsyncDisposable
     public string CloseReason { get; private set; } = "Disconnected";
     public event Action<string>? Activity;
 
-    private SecureSession(TcpClient client, SslStream stream, Guid id, MessageGuard guard, string peerId, string name)
+    private SecureSession(TcpClient client, SslStream stream, Guid id, MessageGuard guard, string peerId, string name, bool canSendScreen, bool canReceiveScreen, string verificationCode)
     {
         _client = client; _stream = stream; _id = id; _guard = guard; PeerId = peerId; PeerName = name;
+        CanSendScreen = canSendScreen; CanReceiveScreen = canReceiveScreen; VerificationCode = verificationCode;
     }
 
     public static async Task<SecureSession> ConnectAsync(string address, int port, string expectedHostId,
-        string displayName, DeviceIdentity identity, Action<SessionState> state, CancellationToken token)
+        string displayName, DeviceIdentity identity, Action<SessionState> state, CancellationToken token, bool requestScreen = false, Action<string>? verificationCode = null)
     {
         expectedHostId = DeviceIdentity.NormalizeId(expectedHostId);
         var client = new TcpClient { NoDelay = true };
@@ -60,16 +68,19 @@ public sealed class SecureSession : IAsyncDisposable
             using var approvalTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             approvalTimeout.CancelAfter(TimeSpan.FromSeconds(60));
             var id = Guid.NewGuid();
+            string code = NumericDeviceId.VerificationCode(id, identity.DeviceId, expectedHostId);
+            verificationCode?.Invoke(code);
             await WireProtocol.WriteAsync(stream, WireProtocol.Create(id, 1, MessageType.ConnectionRequest,
-                new(identity.DeviceId, displayName)), approvalTimeout.Token).ConfigureAwait(false);
+                new(identity.DeviceId, displayName, requestScreen)), approvalTimeout.Token).ConfigureAwait(false);
             var guard = new MessageGuard(id);
             var response = await WireProtocol.ReadAsync(stream, approvalTimeout.Token).ConfigureAwait(false);
             guard.Accept(response);
             if (response.Type == MessageType.Rejection) throw new UnauthorizedAccessException("The Host declined the request.");
             if (response.Type != MessageType.Approval) throw new InvalidDataException("Expected attended approval.");
             token.ThrowIfCancellationRequested();
+            if (response.Payload.ViewScreen && !requestScreen) throw new InvalidDataException("Unexpected screen permission.");
             state(SessionState.Connected);
-            return new(client, stream, id, guard, expectedHostId, address);
+            return new(client, stream, id, guard, expectedHostId, address, false, response.Payload.ViewScreen, code);
         }
         catch { stream?.Dispose(); client.Dispose(); throw; }
     }
@@ -104,18 +115,20 @@ public sealed class SecureSession : IAsyncDisposable
             bool accepted;
             try
             {
-                accepted = await approve(new(peerId, request.Payload.DisplayName!, client.Client.RemoteEndPoint?.ToString() ?? "Unknown"),
+                accepted = await approve(new(peerId, request.Payload.DisplayName!, client.Client.RemoteEndPoint?.ToString() ?? "Unknown",
+                    NumericDeviceId.VerificationCode(request.SessionId, peerId, identity.DeviceId), request.Payload.ViewScreen),
                     approvalTimeout.Token).WaitAsync(approvalTimeout.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!token.IsCancellationRequested) { accepted = false; }
             using var replyTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             replyTimeout.CancelAfter(TimeSpan.FromSeconds(5));
             await WireProtocol.WriteAsync(stream, WireProtocol.Create(request.SessionId, 1,
-                accepted ? MessageType.Approval : MessageType.Rejection), replyTimeout.Token).ConfigureAwait(false);
+                accepted ? MessageType.Approval : MessageType.Rejection, new(ViewScreen: accepted && request.Payload.ViewScreen)), replyTimeout.Token).ConfigureAwait(false);
             if (!accepted) { stream.Dispose(); client.Dispose(); return null; }
             token.ThrowIfCancellationRequested();
             state(SessionState.Connected);
-            return new(client, stream, request.SessionId, guard, peerId, request.Payload.DisplayName!);
+            return new(client, stream, request.SessionId, guard, peerId, request.Payload.DisplayName!, request.Payload.ViewScreen, false,
+                NumericDeviceId.VerificationCode(request.SessionId, peerId, identity.DeviceId));
         }
         catch { stream?.Dispose(); client.Dispose(); throw; }
     }
@@ -141,6 +154,10 @@ public sealed class SecureSession : IAsyncDisposable
                 {
                     case MessageType.Ping: await SendAsync(MessageType.Pong, _stop.Token).ConfigureAwait(false); break;
                     case MessageType.Pong: Activity?.Invoke("Heartbeat acknowledged"); break;
+                    case MessageType.ScreenFrame when CanReceiveScreen:
+                        ScreenReceived?.Invoke(message.Payload.Jpeg!); break;
+                    case MessageType.ScreenUnavailable when CanReceiveScreen:
+                        ScreenUnavailable?.Invoke(); break;
                     case MessageType.Disconnect: Close("Peer disconnected"); return;
                     default: throw new InvalidDataException("Unexpected message in connected state.");
                 }
@@ -161,15 +178,32 @@ public sealed class SecureSession : IAsyncDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex) when (ex is InvalidDataException or IOException or SocketException or ObjectDisposedException) { Close("Connection lost"); }
     }
-    private async Task SendAsync(MessageType type, CancellationToken token)
+    public void StartScreenProducer(Func<CancellationToken, Task> producer)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        if (!CanSendScreen || Interlocked.Exchange(ref _producerStarted, 1) != 0)
+            throw new InvalidOperationException("Only the approved Host may start one screen producer.");
+        _producerTask = Task.Run(() => producer(_stop.Token));
+    }
+    public Task SendScreenAsync(byte[] jpeg, CancellationToken token)
+    {
+        if (!CanSendScreen) throw new UnauthorizedAccessException("Screen sharing was not approved for this sender.");
+        return SendAsync(MessageType.ScreenFrame, token, new(Jpeg: jpeg));
+    }
+    public Task NotifyScreenUnavailableAsync(CancellationToken token)
+    {
+        if (!CanSendScreen) throw new UnauthorizedAccessException("Screen sharing was not approved.");
+        return SendAsync(MessageType.ScreenUnavailable, token);
+    }
+    private async Task SendAsync(MessageType type, CancellationToken token, Payload? payload = null)
+    {
+        if (Volatile.Read(ref _closed) != 0) throw new IOException("Session is closed.");
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token, _stop.Token);
         timeout.CancelAfter(TimeSpan.FromSeconds(5));
         await _writeGate.WaitAsync(timeout.Token).ConfigureAwait(false);
         try
         {
             if (_sequence >= WireProtocol.MaxMessagesPerSession) throw new InvalidDataException("Session message limit reached. Reconnect with fresh approval.");
-            await WireProtocol.WriteAsync(_stream, WireProtocol.Create(_id, ++_sequence, type), timeout.Token).ConfigureAwait(false);
+            await WireProtocol.WriteAsync(_stream, WireProtocol.Create(_id, ++_sequence, type, payload), timeout.Token).ConfigureAwait(false);
         }
         finally { _writeGate.Release(); }
     }
@@ -194,6 +228,7 @@ public sealed class SecureSession : IAsyncDisposable
         await DisconnectAsync().ConfigureAwait(false);
         if (_receiveTask is not null) await _receiveTask.ConfigureAwait(false);
         if (_heartbeatTask is not null) await _heartbeatTask.ConfigureAwait(false);
+        if (_producerTask is not null) await _producerTask.ConfigureAwait(false);
         // No producers remain after both loops finish.
         _writeGate.Dispose(); _stop.Dispose();
     }

@@ -1,0 +1,1 @@
+<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../RemoteDesk.Security/RemoteDesk.Security.csproj" /></ItemGroup></Project>

@@ -73,9 +73,9 @@ jobs:
           Source commit: ${{ github.sha }}
           Workflow: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           Runner: windows-latest, Windows x64, .NET 10 SDK.
-          Checks: Release solution build, Core/Protocol/Security integration suites, Windows CNG persistence and non-exportability, WPF window startup and rendered workspace/default-off state checks.
+          Checks: Release solution build, Core/Protocol/Security integration suites, Windows CNG persistence and non-exportability, WPF startup plus end-to-end numeric discovery, approved TLS, real GDI primary-desktop capture, JPEG transport/decoding, disconnect and close.
           Manual two-PC LAN, DPI and resource acceptance: pending (see docs/Acceptance.md).
-          Package is unsigned. No screen streaming or remote input in phase one.
+          Package is unsigned. Primary display viewing is implemented. No remote input, files, unattended access or Internet ID routing.
           "@ | Set-Content run/BUILD-INFO.md
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

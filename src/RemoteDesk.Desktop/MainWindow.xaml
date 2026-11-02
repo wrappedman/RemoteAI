@@ -14,7 +14,7 @@
           <DockPanel Margin="4,28,0,12"><TextBlock Text="SAVED DEVICES" FontSize="10" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/><Button Content="+" Padding="8,2" HorizontalAlignment="Right" Click="Save_Click" ToolTip="Save the target currently entered in the connection form"/></DockPanel>
           <ListBox x:Name="DeviceList" Background="Transparent" BorderThickness="0" Foreground="#EAF0F8" MaxHeight="340" SelectionChanged="Device_Selected" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
             <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem"><Border x:Name="ItemBorder" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" CornerRadius="7" Padding="4"><ContentPresenter/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="#1B2430"/></Trigger><Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="#213047"/><Setter TargetName="ItemBorder" Property="BorderBrush" Value="#64AAFF"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style></ListBox.ItemContainerStyle>
-            <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="4,9"><TextBlock Text="{Binding Name}" FontSize="14"/><TextBlock Text="{Binding Address}" FontSize="11" Foreground="#96A2B5" Margin="0,5,0,0"/></StackPanel></DataTemplate></ListBox.ItemTemplate>
+            <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="4,9"><TextBlock Text="{Binding Name}" FontSize="14"/><TextBlock Text="{Binding Code}" FontSize="11" Foreground="#96A2B5" Margin="0,5,0,0"/></StackPanel></DataTemplate></ListBox.ItemTemplate>
           </ListBox>
           <TextBlock x:Name="EmptyDevices" Text="No saved devices yet.&#x0a;Enter a target, then select +." Foreground="{StaticResource Muted}" FontSize="12" LineHeight="20" Margin="5,5"/>
         </StackPanel>
@@ -28,14 +28,14 @@
       <Border Background="#171A20" BorderBrush="#2B323E" BorderThickness="0,0,0,1">
         <DockPanel Margin="22,0">
           <StackPanel Orientation="Horizontal"><TextBlock Text="⌂" FontSize="21" VerticalAlignment="Center" Margin="0,0,24,0"/><Border BorderBrush="#64AAFF" BorderThickness="0,0,0,3" Background="#202631" Padding="20,0"><StackPanel Orientation="Horizontal" VerticalAlignment="Center"><TextBlock Text="▣" Foreground="{StaticResource Accent}" Margin="0,0,9,0"/><TextBlock Text="Connection center" FontWeight="SemiBold"/></StackPanel></Border></StackPanel>
-          <TextBlock Text="LAN PREVIEW  /  v0.1" Foreground="{StaticResource Muted}" FontSize="10" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+          <TextBlock Text="LAN VIEWER  /  v0.2" Foreground="{StaticResource Muted}" FontSize="10" HorizontalAlignment="Right" VerticalAlignment="Center"/>
         </DockPanel>
       </Border>
       <Border Grid.Row="1" Background="#1D2129" BorderBrush="#2B323E" BorderThickness="0,0,0,1">
         <DockPanel Margin="22,0">
-          <StackPanel Orientation="Horizontal" VerticalAlignment="Center" ToolTip="Remote input and screen streaming are not part of phase one">
+          <StackPanel Orientation="Horizontal" VerticalAlignment="Center" ToolTip="View-only release: remote keyboard and mouse are not enabled">
             <Button Content="Ctrl" IsEnabled="False" Padding="9,4" Background="Transparent" BorderBrush="Transparent"/><Button Content="Alt" IsEnabled="False" Padding="9,4" Background="Transparent" BorderBrush="Transparent"/><Button Content="Win" IsEnabled="False" Padding="9,4" Background="Transparent" BorderBrush="Transparent"/><Button Content="Del" IsEnabled="False" Padding="9,4" Background="Transparent" BorderBrush="Transparent"/>
-            <TextBlock Text="│" Foreground="#3D4757" Margin="12,0" VerticalAlignment="Center"/><TextBlock Text="Secure connection comes first" Foreground="{StaticResource Muted}" FontSize="11" VerticalAlignment="Center"/>
+            <TextBlock Text="│" Foreground="#3D4757" Margin="12,0" VerticalAlignment="Center"/><TextBlock Text="View only · remote input disabled" Foreground="{StaticResource Muted}" FontSize="11" VerticalAlignment="Center"/>
           </StackPanel>
           <TextBlock x:Name="TopStatus" Text="●  Initializing" Foreground="#6FD8B3" FontSize="12" VerticalAlignment="Center" HorizontalAlignment="Right"/>
         </DockPanel>
@@ -43,20 +43,35 @@
       <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel Margin="30,26,30,24">
           <DockPanel Margin="0,0,0,22">
-            <StackPanel><TextBlock Text="A secure connection starts here." FontSize="26" FontWeight="SemiBold"/><TextBlock Text="Connect to a trusted Windows device on your local network." Foreground="{StaticResource Muted}" Margin="0,8,0,0" FontSize="13"/></StackPanel>
+            <StackPanel><TextBlock Text="Your devices. One simple ID." FontSize="26" FontWeight="SemiBold"/><TextBlock Text="Enter a RemoteDesk ID to view a device on the same private LAN." Foreground="{StaticResource Muted}" Margin="0,8,0,0" FontSize="13"/></StackPanel>
             <Border HorizontalAlignment="Right" VerticalAlignment="Top" Background="#152C27" BorderBrush="#2A5145" BorderThickness="1" CornerRadius="12" Padding="10,5"><TextBlock Text="↔  DIRECT LAN" Foreground="#74D9B5" FontSize="10"/></Border>
           </DockPanel>
-          <Grid>
+          <Border x:Name="PairingPanel" Visibility="Collapsed" Background="#1C2C41" BorderBrush="#42628C" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,16"><TextBlock x:Name="PairingText" TextWrapping="Wrap" FontSize="14"/></Border>
+          <Border x:Name="SharingPanel" Visibility="Collapsed" Background="#3D2830" BorderBrush="#B45B6E" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,16"><DockPanel><Button DockPanel.Dock="Right" Content="Stop sharing" Click="Disconnect_Click" Background="#65313E"/><StackPanel><TextBlock Text="●  YOUR PRIMARY DISPLAY IS SHARED" FontWeight="SemiBold"/><TextBlock Text="View only. Close this session to stop all screen transmission." Foreground="#E6BBC6" Margin="0,6,12,0" TextWrapping="Wrap"/></StackPanel></DockPanel></Border>
+          <Border x:Name="ViewerPanel" Visibility="Collapsed" Style="{StaticResource Card}" Padding="16" Margin="0,0,0,10">
+            <StackPanel><DockPanel><Button x:Name="ViewerDisconnectButton" DockPanel.Dock="Right" Content="Disconnect" Click="Disconnect_Click" Background="#47252D"/><StackPanel><TextBlock Text="Remote desktop" FontSize="19" FontWeight="SemiBold"/><TextBlock Text="PRIMARY DISPLAY · VIEW ONLY" Foreground="{StaticResource Accent}" FontSize="10" Margin="0,6,0,0"/></StackPanel></DockPanel>
+              <Border Background="#05070B" CornerRadius="6" Margin="0,14,0,12" Height="420" ClipToBounds="True"><Image x:Name="RemoteImage" Stretch="Uniform" AutomationProperties.Name="Live remote primary display"/></Border>
+              <TextBlock x:Name="ViewerStatus" TextWrapping="Wrap" Foreground="{StaticResource Muted}" FontSize="12"/>
+            </StackPanel>
+          </Border>
+          <Grid x:Name="ConnectionCards">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <Border Style="{StaticResource Card}">
               <StackPanel>
                 <TextBlock Text="↗  Connect to a device" FontSize="19" FontWeight="SemiBold"/>
-                <TextBlock Text="Start an attended, encrypted LAN session." Foreground="{StaticResource Muted}" Margin="0,8,0,20" FontSize="12"/>
-                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="78"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="HOST ADDRESS" Style="{StaticResource Caption}"/><TextBox x:Name="AddressBox" Tag="e.g. 192.168.1.25" AutomationProperties.Name="Host address" ToolTip="IPv4 address or LAN hostname" MaxLength="253"/></StackPanel><StackPanel Grid.Column="2"><TextBlock Text="PORT" Style="{StaticResource Caption}"/><TextBox x:Name="PortBox" Text="45831" MaxLength="5" AutomationProperties.Name="Host port"/></StackPanel></Grid>
-                <TextBlock Text="HOST DEVICE FINGERPRINT" Style="{StaticResource Caption}" Margin="0,18,0,8"/>
-                <TextBox x:Name="FingerprintBox" Height="65" TextWrapping="Wrap" MaxLength="96" FontFamily="Consolas" FontSize="12" AutomationProperties.Name="Expected Host fingerprint"/>
-                <TextBlock Text="Ask the Host to share their full device ID through a trusted channel. Never skip this check." Foreground="{StaticResource Muted}" TextWrapping="Wrap" FontSize="11" Margin="0,10,0,20" LineHeight="17"/>
-                <Button x:Name="ConnectButton" Content="Connect securely   →" Background="#3885EB" BorderBrush="#599FF8" Foreground="White" FontWeight="SemiBold" Click="Connect_Click"/>
+                <TextBlock Text="Find a device and request screen viewing." Foreground="{StaticResource Muted}" Margin="0,8,0,20" FontSize="12"/>
+                <TextBlock Text="DESTINATION REMOTEDESK ID" Style="{StaticResource Caption}"/>
+                <TextBox x:Name="TargetIdBox" Tag="123 456 789 012" Height="52" FontSize="22" FontFamily="Consolas" MaxLength="20" AutomationProperties.Name="Destination 12-digit RemoteDesk ID"/>
+                <TextBlock Text="No IP address or fingerprint to type. The Host must approve before you can see their screen." Foreground="{StaticResource Muted}" TextWrapping="Wrap" FontSize="12" Margin="0,12,0,18" LineHeight="18"/>
+                <Expander Header="Advanced: manual IP &amp; full fingerprint" Foreground="#AABCD2" Margin="0,0,0,16">
+                  <StackPanel Margin="0,12,0,0">
+                    <CheckBox x:Name="ManualCheck" Content="Use manual address instead of numeric ID" Foreground="#DCE6F5" FontSize="11" Margin="0,0,0,12"/>
+                    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="78"/></Grid.ColumnDefinitions><TextBox x:Name="AddressBox" Tag="LAN address" MaxLength="253"/><TextBox x:Name="PortBox" Grid.Column="2" Text="45831" MaxLength="5"/></Grid>
+                    <TextBlock Text="EXPECTED HOST FINGERPRINT" Style="{StaticResource Caption}" Margin="0,12,0,8"/>
+                    <TextBox x:Name="FingerprintBox" Height="65" TextWrapping="Wrap" MaxLength="96" FontFamily="Consolas" FontSize="12"/>
+                  </StackPanel>
+                </Expander>
+                <Button x:Name="ConnectButton" Content="View remote screen   →" Background="#3885EB" BorderBrush="#599FF8" Foreground="White" FontWeight="SemiBold" Click="Connect_Click"/>
                 <Button x:Name="DisconnectButton" Content="Cancel / Disconnect" Visibility="Collapsed" Background="#47252D" BorderBrush="#80414D" Margin="0,8,0,0" Click="Disconnect_Click"/>
               </StackPanel>
             </Border>
@@ -65,22 +80,23 @@
                 <DockPanel><TextBlock Text="▣  This device" FontSize="19" FontWeight="SemiBold"/><TextBlock x:Name="ListenerBadge" Text="OFFLINE" Foreground="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center" HorizontalAlignment="Right"/></DockPanel>
                 <TextBlock x:Name="MachineNameText" FontSize="14" Margin="0,16,0,5"/>
                 <TextBlock x:Name="LocalAddressText" Text="Discovering local addresses…" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap"/>
-                <TextBlock Text="YOUR DEVICE ID · SHA-256" Style="{StaticResource Caption}" Margin="0,22,0,8"/>
-                <TextBox x:Name="IdentityBox" IsReadOnly="True" TextWrapping="Wrap" Height="65" FontFamily="Consolas" FontSize="12" AutomationProperties.Name="This device fingerprint"/>
+                <TextBlock Text="YOUR REMOTEDESK ID" Style="{StaticResource Caption}" Margin="0,22,0,8"/>
+                <TextBox x:Name="IdentityBox" IsReadOnly="True" TextWrapping="Wrap" Height="52" FontFamily="Consolas" FontSize="22" AutomationProperties.Name="This device numeric ID"/>
                 <Button Content="Copy device ID" Click="Copy_Click" Margin="0,12,0,0"/>
-                <TextBlock Text="The requesting device proves possession of its key. Approve only after comparing its fingerprint." Foreground="{StaticResource Muted}" TextWrapping="Wrap" FontSize="11" LineHeight="17" Margin="0,16,0,14"/>
-                <CheckBox x:Name="ListenCheck" Content="Allow attended requests on port 45831" Foreground="#EAF0F8" FontSize="12" Checked="Listen_Changed" Unchecked="Listen_Changed"/>
+                <TextBlock Text="Compare the six-digit verification code before approving. Sharing stops when you disconnect." Foreground="{StaticResource Muted}" TextWrapping="Wrap" FontSize="11" LineHeight="17" Margin="0,16,0,14"/>
+                <CheckBox x:Name="ListenCheck" Content="Available for attended LAN connections" Foreground="#EAF0F8" FontSize="12" Checked="Listen_Changed" Unchecked="Listen_Changed"/>
+                <Expander Header="Advanced: full device fingerprint" Foreground="#AABCD2" Margin="0,16,0,0"><TextBox x:Name="FullFingerprintBox" IsReadOnly="True" Height="65" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" Margin="0,10,0,0"/></Expander>
               </StackPanel>
             </Border>
           </Grid>
           <Border x:Name="ApprovalPanel" Visibility="Collapsed" Background="#202C3D" BorderBrush="#64AAFF" BorderThickness="1" CornerRadius="10" Padding="20" Margin="0,18,0,0">
-            <StackPanel><TextBlock Text="Incoming connection · action required" FontWeight="SemiBold" FontSize="17"/><TextBlock x:Name="ApprovalDetails" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" Margin="0,12,0,10"/><TextBlock Text="Compare the full fingerprint with the requester through a trusted channel. The name is self-reported. Approval allows protocol messages only; no desktop or input access." TextWrapping="Wrap" Foreground="#BDCCE0" FontSize="12"/><StackPanel Orientation="Horizontal" Margin="0,14,0,0"><Button Content="Approve verified device" Click="Approve_Click" Background="#275A49"/><Button Content="Reject" Click="Reject_Click" Margin="10,0,0,0"/></StackPanel></StackPanel>
+            <StackPanel><TextBlock Text="Incoming connection · action required" FontWeight="SemiBold" FontSize="17"/><TextBlock x:Name="ApprovalDetails" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" Margin="0,12,0,10"/><TextBlock Text="Compare the six-digit code with the Controller through a trusted channel. Approving a screen request exposes everything visible on your primary display. Mouse and keyboard control are not granted." TextWrapping="Wrap" Foreground="#BDCCE0" FontSize="12"/><StackPanel Orientation="Horizontal" Margin="0,14,0,0"><Button x:Name="ApproveButton" Content="Approve &amp; share my screen" Click="Approve_Click" Background="#275A49"/><Button Content="Reject" Click="Reject_Click" Margin="10,0,0,0"/></StackPanel></StackPanel>
           </Border>
           <Border Style="{StaticResource Card}" Margin="0,20,0,0" Padding="20,17">
             <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
               <StackPanel><TextBlock Text="SESSION STATUS" Style="{StaticResource Caption}"/><TextBlock x:Name="StateText" Text="Disconnected" FontSize="16"/></StackPanel>
               <StackPanel Grid.Column="1"><TextBlock Text="TRANSPORT SECURITY" Style="{StaticResource Caption}"/><TextBlock x:Name="CipherText" Text="Mutual TLS · pinned identity" FontSize="12" TextWrapping="Wrap"/></StackPanel>
-              <StackPanel Grid.Column="2"><TextBlock Text="SESSION CAPABILITIES" Style="{StaticResource Caption}"/><TextBlock Text="Protocol &amp; heartbeat only" FontSize="12"/><TextBlock Text="Screen / input: not available in phase 1" FontSize="10" Foreground="{StaticResource Muted}" Margin="0,5,0,0"/></StackPanel>
+              <StackPanel Grid.Column="2"><TextBlock Text="SESSION CAPABILITIES" Style="{StaticResource Caption}"/><TextBlock Text="Primary display · view only" FontSize="12"/><TextBlock Text="No keyboard, mouse, files or clipboard" FontSize="10" Foreground="{StaticResource Muted}" Margin="0,5,0,0"/></StackPanel>
               <TextBlock x:Name="PeerText" Grid.Row="1" Grid.ColumnSpan="3" Text="No active peer" TextWrapping="Wrap" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource Muted}" Margin="0,14,0,0"/>
             </Grid>
           </Border>
@@ -89,7 +105,7 @@
           <TextBlock x:Name="ErrorText" Foreground="#FF9DAB" TextWrapping="Wrap" Margin="0,12,0,0" AutomationProperties.LiveSetting="Polite"/>
         </StackPanel>
       </ScrollViewer>
-      <Border Grid.Row="3" Background="#13161B" BorderBrush="#2A303A" BorderThickness="0,1,0,0" Padding="18,0"><DockPanel><TextBlock x:Name="FooterText" Text="RemoteDesk  /  Phase 1" Foreground="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center"/><TextBlock Text="Encrypted in transit. Approved by you." Foreground="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center" HorizontalAlignment="Right"/></DockPanel></Border>
+      <Border Grid.Row="3" Background="#13161B" BorderBrush="#2A303A" BorderThickness="0,1,0,0" Padding="18,0"><DockPanel><TextBlock x:Name="FooterText" Text="RemoteDesk  /  LAN viewer v0.2" Foreground="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center"/><TextBlock Text="Encrypted in transit. Approved by you." Foreground="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center" HorizontalAlignment="Right"/></DockPanel></Border>
     </Grid>
   </Grid>
 </Window>
