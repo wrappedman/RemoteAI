@@ -54,6 +54,7 @@ internal static class Program
                 if (!PasswordVerifier.Verify(verifier, "Test-only-unique-password-123!") || PasswordVerifier.Verify(verifier, "wrong-password-123!")) throw new Exception("DPAPI/PBKDF2 verifier failed.");
                 using (var input = new InputController()) input.Post(new(InputKind.ReleaseAll)); // No synthetic keys or physical blocking in CI.
                 await TestConsentAndFilesAsync(window, Path.GetDirectoryName(Path.GetFullPath(path))!);
+                await TestPasswordSetupAsync(window, Path.GetDirectoryName(Path.GetFullPath(path))!);
                 await TestAdminContractAsync();
                 await TestTabsAsync(window, Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!, "RemoteDesk-viewer.png"));
                 Console.WriteLine("PASS: multiple full-size session tabs, numeric discovery, real desktop capture/binary transfer/background decoding, frame refresh, independent disconnect, fullscreen, settings, DPAPI password verifier and input worker cleanup.");
@@ -171,6 +172,97 @@ internal static class Program
         }
         finally { Directory.Delete(temporary, true); }
     }
+    private static async Task TestPasswordSetupAsync(MainWindow window, string screenshots)
+    {
+        const string password = "Test-only-Auto-Password-7491!";
+        var page = (SettingsView)window.FindName("SettingsPage");
+        using var controllerIdentity = DeviceIdentity.CreateForTesting();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(75));
+        await SavePolicyAsync(window, new AppSettings());
+        // A valid draft must survive an unrelated validation failure. Nothing was saved yet.
+        page.Load(new AppSettings());
+        ((TextBox)page.FindName("FolderSetting")).Text = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "missing");
+        ((PasswordBox)page.FindName("NewPassword")).Password = password;
+        ((CheckBox)page.FindName("PasswordSetting")).IsChecked = true;
+        ((CheckBox)page.FindName("PasswordControlSetting")).IsChecked = true;
+        ((CheckBox)page.FindName("PasswordFilesSetting")).IsChecked = true;
+        ((Button)page.FindName("SaveSettingsButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Until(() => page.IsEnabled && ((TextBlock)page.FindName("SettingsStatus")).Text.StartsWith("Not saved:"));
+        if (((PasswordBox)page.FindName("NewPassword")).Password != password || AppSettings.Load().ProtectedPasswordVerifier is not null)
+            throw new Exception("Failed settings save erased the password draft or persisted invalid settings.");
+        ((TextBox)page.FindName("FolderSetting")).Text = "";
+        ((Button)page.FindName("SaveSettingsButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Until(() => page.IsEnabled && ((TextBlock)page.FindName("SettingsStatus")).Text.StartsWith("Saved."));
+        var saved = AppSettings.Load();
+        if (!saved.PasswordAccess || saved.TrustedControllers.Count != 0 || !PasswordVerifier.Verify(saved.ProtectedPasswordVerifier!, password) ||
+            ((PasswordBox)page.FindName("NewPassword")).Password.Length != 0 || !((TextBlock)page.FindName("PasswordState")).Text.Contains("waiting for a trusted"))
+            throw new Exception("Saving a password before pairing did not persist a usable verifier / setup state.");
+        string json = await File.ReadAllTextAsync(Path.Combine(AppSettings.DataDirectory, "settings-v3.json"));
+        if (json.Contains(password)) throw new Exception("Password was stored as plaintext.");
+        string pin = ((TextBox)window.FindName("FullFingerprintBox")).Text;
+        async Task<SecureSession> Connect(string? secret) => await SecureSession.ConnectAsync("127.0.0.1", 45831, pin, "Password regression", controllerIdentity,
+            _ => { }, deadline.Token, requested: new(true, true, true, true), password: secret);
+        async Task Rejected(string secret)
+        {
+            try { await using var unexpected = await Connect(secret); throw new Exception("Invalid automatic authorization was accepted."); }
+            catch (UnauthorizedAccessException) { }
+            await Task.Delay(100);
+            if (((FrameworkElement)window.FindName("ApprovalPanel")).Visibility == Visibility.Visible)
+                throw new Exception("A submitted password silently fell back to manual consent.");
+        }
+        await Rejected(password); // Correct password, unknown Controller: still rejected.
+        var pairing = Connect(null);
+        await Until(() => ((FrameworkElement)window.FindName("ApprovalPanel")).Visibility == Visibility.Visible);
+        // Simulate a draft already being edited when a manual pairing is approved.
+        ((PasswordBox)page.FindName("NewPassword")).Password = "Unsaved-draft-must-not-be-lost";
+        ((CheckBox)window.FindName("TrustControllerCheck")).IsChecked = true;
+        ((Button)window.FindName("ApproveButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await using (var paired = await pairing)
+        {
+            paired.Start();
+            await Until(() => window.ActiveViews.Count == 1);
+            if (((PasswordBox)page.FindName("NewPassword")).Password != "Unsaved-draft-must-not-be-lost")
+                throw new Exception("Manual trust approval erased the settings password draft.");
+            await paired.DisconnectAsync(); await Until(() => window.ActiveViews.Count == 0); await Task.Delay(100);
+        }
+        saved = AppSettings.Load();
+        if (!saved.TrustedControllers.Contains(controllerIdentity.DeviceId) || !PasswordVerifier.Verify(saved.ProtectedPasswordVerifier!, password))
+            throw new Exception("Pairing did not preserve the saved password / trusted full key.");
+        page.Load(saved); // Discard the deliberately unsaved test draft.
+        await using (var automatic = await Connect(password))
+        {
+            automatic.Start(); await Until(() => window.ActiveViews.Count == 1);
+            if (!automatic.Permissions.ControlInput || !automatic.Permissions.FileAccess || automatic.Permissions.DesktopEffects ||
+                ((FrameworkElement)window.FindName("ApprovalPanel")).Visibility == Visibility.Visible)
+                throw new Exception("Trusted password approval did not bypass the popup with the configured capability subset.");
+            await automatic.DisconnectAsync(); await Until(() => window.ActiveViews.Count == 0); await Task.Delay(100);
+        }
+        var settingsTab = (TabItem)window.FindName("SettingsTab"); settingsTab.Visibility = Visibility.Visible;
+        ((TabControl)window.FindName("Workspace")).SelectedItem = settingsTab;
+        ((FrameworkElement)page.FindName("PasswordState")).BringIntoView(); await Task.Delay(150);
+        Screenshot(window, Path.Combine(screenshots, "RemoteDesk-password.png"));
+        // A missing shared folder must not reset the password when the app reloads settings.
+        string removable = Path.Combine(Path.GetTempPath(), "RemoteDesk-offline-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(removable); saved.SharedFolder = removable; await saved.SaveAsync(); Directory.Delete(removable);
+        var recovered = AppSettings.Load();
+        if (!recovered.PasswordAccess || recovered.TrustedControllers.Count != 1 || !PasswordVerifier.Verify(recovered.ProtectedPasswordVerifier!, password) || recovered.LoadWarning is null || recovered.SharedFolder != "")
+            throw new Exception("An unavailable shared folder discarded password/trust settings.");
+        await SavePolicyAsync(window, recovered);
+        for (int i = 0; i < 3; i++) await Rejected("Wrong-test-password-7491!");
+        await Rejected(password); // Correct password is blocked during the real Host cooldown.
+        long now = 100000;
+        var policy = new AutomaticAccessPolicy(() => now);
+        var request = new ApprovalRequest(controllerIdentity.DeviceId, "Policy test", "127.0.0.1", Password: "Wrong-test-password-7491!");
+        for (int i = 0; i < 3; i++)
+            if (await policy.EvaluateAsync(recovered, request, deadline.Token) != AutomaticAccessResult.InvalidPassword) throw new Exception("Wrong password result.");
+        if (await policy.EvaluateAsync(recovered, request with { Password = password }, deadline.Token) != AutomaticAccessResult.Cooldown) throw new Exception("Cooldown not enforced.");
+        now += 60001;
+        if (await policy.EvaluateAsync(recovered, request with { Password = password }, deadline.Token) != AutomaticAccessResult.Approved) throw new Exception("Cooldown did not expire.");
+        recovered.PasswordAccess = false; await SavePolicyAsync(window, recovered);
+        await Rejected(password); // Disabled auto access must not display a manual popup either.
+        await SavePolicyAsync(window, new AppSettings());
+        Console.WriteLine("PASS: actual Settings password save before pairing, draft retention, DPAPI reload/no plaintext, unknown-key rejection, manual full-key trust, automatic TLS login without popup, capability subset, missing-folder recovery, wrong-password/disabled fail-closed and cooldown expiry.");
+    }
     private static async Task TestAdminContractAsync()
     {
         using var hostIdentity = DeviceIdentity.CreateForTesting(); using var controllerIdentity = DeviceIdentity.CreateForTesting();
@@ -224,6 +316,11 @@ internal static class Program
         await using var discovery = new LanDiscovery(identity1, host1.Port, "Host one"); discovery.Start();
         var workspace = (TabControl)window.FindName("Workspace");
         ((TextBox)window.FindName("TargetIdBox")).Text = NumericDeviceId.Format(NumericDeviceId.FromFingerprint(identity1.DeviceId));
+        ((PasswordBox)window.FindName("ConnectionPassword")).Password = "First-contact-must-not-send-123!";
+        ((Button)window.FindName("ConnectButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Until(() => ((Button)window.FindName("ConnectButton")).IsEnabled);
+        if (!((TextBlock)window.FindName("ErrorText")).Text.Contains("previously pinned Host") || window.ActiveViews.Count != 0)
+            throw new Exception("A numeric first-contact password was sent without a prior Host pin.");
         ((Button)window.FindName("ConnectButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         await Until(() => window.ActiveViews.Count == 1 && Image(window.ActiveViews[0]).Source is BitmapSource);
         var first = window.ActiveViews[0];

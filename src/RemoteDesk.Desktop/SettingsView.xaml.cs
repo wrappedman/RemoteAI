@@ -20,8 +20,32 @@ public partial class SettingsView : UserControl
         PasswordControlSetting.IsChecked = settings.PasswordControl; PasswordFilesSetting.IsChecked = settings.PasswordFiles;
         FpsSetting.SelectedIndex = Math.Max(0, Array.IndexOf(new[] { 5, 15, 20, 24, 30 }, settings.DefaultFps));
         WidthSetting.SelectedIndex = Math.Max(0, Array.IndexOf(new[] { 960, 1440, 1920 }, settings.DefaultWidth));
-        TrustedCount.Text = $"Trusted Controller keys: {_trusted.Count}. Pair manually and check Trust in the incoming approval to add a key.";
-        NewPassword.Clear();
+        RefreshTrustText(); NewPassword.Clear(); PasswordFeedback.Text = ""; RefreshPasswordState(settings);
+    }
+    private void RefreshTrustText() => TrustedCount.Text = $"Trusted Controller keys: {_trusted.Count}. Pair manually and check Trust in the incoming approval to add a key.";
+    private void RefreshPasswordState(AppSettings settings)
+    {
+        bool usable = PasswordVerifier.IsUsable(settings.ProtectedPasswordVerifier);
+        PasswordState.Text = string.IsNullOrEmpty(settings.ProtectedPasswordVerifier) ? "Saved state: no password configured."
+            : !usable ? "Saved password cannot be unlocked by this Windows account. Set a new password here. Automatic access fails closed."
+            : !settings.PasswordAccess ? "Saved state: password configured; automatic approval is OFF."
+            : _trusted.Count == 0 ? "Saved state: password configured; waiting for a trusted Controller. Complete the one-time pairing below."
+            : $"Saved state: automatic approval ready for {_trusted.Count} trusted Controller(s). No plaintext password is saved.";
+    }
+    public void TrustedControllerAdded(string key)
+    {
+        // Do not reload the form: pairing must not erase an unsaved password draft.
+        if (!_trusted.Contains(key)) _trusted.Add(key);
+        RefreshTrustText(); RefreshPasswordState(_current);
+    }
+    public void RefreshSharedFolder(string folder) => FolderSetting.Text = folder;
+    private void NewPassword_Changed(object sender, RoutedEventArgs e)
+    {
+        if (PasswordEditHint is null) return;
+        int length = NewPassword.Password.Length;
+        PasswordEditHint.Text = length == 0 ? "Leave empty to keep a saved password. Changes take effect only after Save settings."
+            : length < 16 ? $"Not saved: {length} characters entered; at least 16 required."
+            : "New password entered; use Save settings to apply it. It is cleared only after a successful save.";
     }
     private void Folder_Click(object sender, RoutedEventArgs e)
     {
@@ -37,12 +61,12 @@ public partial class SettingsView : UserControl
     private void RemovePassword_Click(object sender, RoutedEventArgs e) { _removePassword = true; PasswordSetting.IsChecked = false; NewPassword.Clear(); SettingsStatus.Text = "The verifier will be removed when you save."; }
     private async void Save_Click(object sender, RoutedEventArgs e)
     {
-        SaveSettingsButton.IsEnabled = false; SettingsStatus.Text = "";
+        IsEnabled = false; SaveSettingsButton.IsEnabled = false; SettingsStatus.Text = ""; PasswordFeedback.Text = "";
         try
         {
             if (!int.TryParse(PortSetting.Text, out int port)) throw new ArgumentException("Enter a TCP port between 1024 and 65535.");
             string? verifier = _removePassword ? null : _current.ProtectedPasswordVerifier;
-            if (NewPassword.Password.Length > 0) { string password = NewPassword.Password; verifier = await Task.Run(() => PasswordVerifier.Create(password)); NewPassword.Clear(); }
+            if (NewPassword.Password.Length > 0) { string password = NewPassword.Password; verifier = await Task.Run(() => PasswordVerifier.Create(password)); }
             var settings = new AppSettings
             {
                 Port = port, AvailableOnStart = AvailableSetting.IsChecked == true, AllowControl = ControlSetting.IsChecked == true,
@@ -54,11 +78,13 @@ public partial class SettingsView : UserControl
                 DefaultFps = int.Parse(((ComboBoxItem)FpsSetting.SelectedItem).Content.ToString()!),
                 DefaultWidth = int.Parse(((ComboBoxItem)WidthSetting.SelectedItem).Content.ToString()!)
             };
-            settings.Validate(); if (SaveRequested is not null) await SaveRequested(settings);
+            settings.Validate();
+            if (SaveRequested is null) throw new InvalidOperationException("Settings storage is not available.");
+            await SaveRequested(settings);
             Load(settings); SettingsStatus.Text = "Saved. Policies and shared folder updated; existing grants are unchanged. Only a port change restarts incoming availability.";
         }
-        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
-        { SettingsStatus.Text = ex.Message; }
-        finally { SaveSettingsButton.IsEnabled = true; }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException or InvalidOperationException)
+        { SettingsStatus.Text = "Not saved: " + ex.Message; PasswordFeedback.Text = SettingsStatus.Text; }
+        finally { SaveSettingsButton.IsEnabled = true; IsEnabled = true; }
     }
 }

@@ -36,8 +36,7 @@ public partial class MainWindow : Window
     private TaskCompletionSource<SessionGrant?>? _approval;
     private ApprovalRequest? _approvalRequest;
     private bool _connecting, _closing, _canClose, _listenerChanging, _fullScreen;
-    private int _passwordFailures;
-    private long _passwordBlockedUntil;
+    private readonly AutomaticAccessPolicy _automaticAccess = new();
     private WindowState _oldWindowState;
     private bool _restartPending;
     private readonly string _devicesPath = Path.Combine(AppSettings.DataDirectory, "devices-v2.json");
@@ -70,6 +69,7 @@ public partial class MainWindow : Window
             FilterDevices(); SettingsPage.Load(_settings); ConnectButton.IsEnabled = true;
             ListenCheck.IsChecked = _settings.AvailableOnStart;
             if (!_settings.AvailableOnStart) ListenerBadge.Text = "Availability off";
+            if (_settings.LoadWarning is not null) Log(_settings.LoadWarning);
             Log("Workspace ready. Each device gets an independent session tab.");
         }
         catch (Exception ex) when (ex is IOException or CryptographicException or UnauthorizedAccessException)
@@ -107,22 +107,26 @@ public partial class MainWindow : Window
     }
     private async Task<SessionGrant?> AuthorizeAsync(ApprovalRequest request, CancellationToken token)
     {
-        // Password access is deliberately restricted to previously, explicitly trusted full keys.
-        if (_settings.PasswordAccess && !string.IsNullOrEmpty(request.Password))
+        // Supplying a password always selects automatic approval. Never silently fall
+        // back to a manual prompt for a disabled, untrusted or incorrect password attempt.
+        if (!string.IsNullOrEmpty(request.Password))
         {
-            if (Environment.TickCount64 < Interlocked.Read(ref _passwordBlockedUntil)) return null;
-            bool trusted = _settings.TrustedControllers.Contains(request.DeviceId, StringComparer.Ordinal);
-            bool valid = trusted && _settings.ProtectedPasswordVerifier is not null &&
-                await Task.Run(() => PasswordVerifier.Verify(_settings.ProtectedPasswordVerifier, request.Password), token);
-            if (!valid)
+            var settings = _settings;
+            var result = await _automaticAccess.EvaluateAsync(settings, request, token);
+            if (result != AutomaticAccessResult.Approved || !ReferenceEquals(settings, _settings))
             {
-                if (Interlocked.Increment(ref _passwordFailures) >= 3) { Interlocked.Exchange(ref _passwordBlockedUntil, Environment.TickCount64 + 60000); Interlocked.Exchange(ref _passwordFailures, 0); }
-                Log("Automatic approval refused (untrusted key, invalid password or cooldown)."); return null;
+                Log(result switch
+                {
+                    AutomaticAccessResult.Disabled => "Automatic access refused: enable password approval and save a password in Host Settings.",
+                    AutomaticAccessResult.UntrustedKey => "Automatic access refused: pair this Controller manually and check Trust this full Controller key first.",
+                    AutomaticAccessResult.Cooldown => "Automatic access temporarily blocked: wait 60 seconds after three failed attempts.",
+                    _ => "Automatic access refused: password mismatch or authorization settings changed."
+                });
+                return null;
             }
-            Interlocked.Exchange(ref _passwordFailures, 0);
-            Log("Password-authorized, explicitly trusted Controller connected while the Host app is visible.");
-            return new(request.ViewScreen, request.ControlInput && _settings.AllowControl && _settings.PasswordControl,
-                request.FileAccess && _settings.AllowFiles && _settings.PasswordFiles, false);
+            Log("Password-authorized, explicitly trusted Controller connected while the Host app is open.");
+            return new(request.ViewScreen, request.ControlInput && settings.AllowControl && settings.PasswordControl,
+                request.FileAccess && settings.AllowFiles && settings.PasswordFiles, false);
         }
         return await Dispatcher.InvokeAsync(() => PromptAsync(request, token)).Task.Unwrap();
     }
@@ -162,7 +166,7 @@ public partial class MainWindow : Window
         var dialog = new OpenFolderDialog { Title = "Select the folder this Controller may browse after Files approval" };
         if (dialog.ShowDialog(this) != true) return;
         string old = _settings.SharedFolder;
-        try { _settings.SharedFolder = dialog.FolderName; await _settings.SaveAsync(); RefreshApprovalPermissions(); SettingsPage.Load(_settings); }
+        try { _settings.SharedFolder = dialog.FolderName; await _settings.SaveAsync(); RefreshApprovalPermissions(); SettingsPage.RefreshSharedFolder(_settings.SharedFolder); }
         catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)
         { _settings.SharedFolder = old; ApprovalPolicyHint.Text = ex.Message; }
     }
@@ -176,7 +180,7 @@ public partial class MainWindow : Window
         {
             if (_settings.TrustedControllers.Count >= 128) { ErrorText.Text = "Trusted Controller limit reached. Forget keys in Settings."; return; }
             _settings.TrustedControllers.Add(request.DeviceId);
-            try { await _settings.SaveAsync(); SettingsPage.Load(_settings); }
+            try { await _settings.SaveAsync(); SettingsPage.TrustedControllerAdded(request.DeviceId); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
             { _settings.TrustedControllers.Remove(request.DeviceId); ErrorText.Text = "Could not persist trust. This session can still use manual consent."; }
         }
@@ -225,9 +229,9 @@ public partial class MainWindow : Window
             {
                 ArgumentException or InvalidDataException => ex.Message,
                 AuthenticationException => "Host identity failed or a saved key changed. Never bypass a changed pin; verify its full fingerprint independently.",
-                UnauthorizedAccessException => "Host denied access (consent/password/trusted-key policy).",
+                UnauthorizedAccessException => "Host refused access. For automatic approval: save/enable its password, pair and trust this Controller first, and check the password. After three failures wait 60 seconds; a submitted password never falls back to manual approval.",
                 OperationCanceledException => "Connection cancelled or approval timed out.",
-                IOException => ex.Message.StartsWith("Device not found", StringComparison.Ordinal) ? ex.Message : "Connection failed. Update both endpoints to v0.3.1 and check the configured TCP / UDP discovery firewall rules.",
+                IOException => ex.Message.StartsWith("Device not found", StringComparison.Ordinal) ? ex.Message : "Connection failed. Update both endpoints to v0.3.2 and check the configured TCP / UDP discovery firewall rules.",
                 _ => "Cannot reach the Host. Check availability, port and Private-network firewall."
             };
             ConnectionStatus.Text = "Not connected";
@@ -323,6 +327,7 @@ public partial class MainWindow : Window
         {
             await settings.SaveAsync();
             if (restart) await StopAvailabilityAsync();
+            if (_settings.ProtectedPasswordVerifier != settings.ProtectedPasswordVerifier || _settings.PasswordAccess != settings.PasswordAccess) _automaticAccess.Reset();
             _settings = settings;
             foreach (var context in _sessions.Values.ToArray())
             {

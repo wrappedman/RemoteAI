@@ -1,6 +1,6 @@
-# RemoteDesk 0.3.1 — quick start
+# RemoteDesk 0.3.2 — quick start
 
-Extract `RemoteDesk-win-x64-portable.zip` and run the extracted `RemoteDesk.exe`; keep all files together. Runtime included. Or run the EXE in the repository run folder with its companion DLLs/JSON and .NET 10 Desktop Runtime x64 installed. **Close old instances and update BOTH endpoints to 0.3.1.**
+Extract `RemoteDesk-win-x64-portable.zip` and run the extracted `RemoteDesk.exe`; keep all files together. Runtime included. Or run the EXE in the repository run folder with its companion DLLs/JSON and .NET 10 Desktop Runtime x64 installed. **Close old instances and update BOTH endpoints to 0.3.2.**
 
 ## Connect and control
 
@@ -51,3 +51,13 @@ Protocol v4 is required; older protocol-v3 endpoints intentionally cannot connec
 **Admin requests:** on the Host, enable `Permit requests to restart with UAC elevation` in Settings and Save (no reconnect for that policy change). Grant Control when approving. The Controller's request waits for a fresh Host confirmation and a normal UAC prompt ON THE HOST. Already-elevated Hosts report that no restart is needed. Denial/failure is persistent below the picture and in Recent activity, not overwritten by frame counters. If UAC is cancelled, availability is restored or a port-conflict explanation is shown. No UAC bypass.
 
 **Animations:** the checkbox reflects the acknowledged Host state. Failure rolls it back with a persistent reason. Both the connection request and Host approval must include Animations; a Host policy denial cannot be bypassed. The app restores original animation flags on normal cleanup.
+
+## 0.3.2 — password setup and automatic-login correction
+
+You can now set/save a unique **16+ character** password and enable automatic approval BEFORE pairing a Controller. With no trusted key yet the saved state explicitly says it is waiting for pairing; no unknown device gains access. Failed validation/storage keeps your password draft, and successful Save clears it. The status next to the password shows configured/off/waiting/ready or a Windows-account decryption error. A missing shared directory no longer resets password/trust settings on startup.
+
+1. On the **Host**, Settings → New password → Enable password access → optional automatic Control/Files grants → Save settings. Check the saved state.
+2. Connect once **without a password**. On the Host, check **Trust this full Controller key for future password-enabled access**, then approve. The Controller saves the Host pin after successful pairing.
+3. Reconnect from that same Controller using Password / advanced connection. Correct password + trusted Controller key + pinned Host opens without an approval popup while the Host app remains open. A submitted password that is wrong/disabled/untrusted is rejected, never silently converted to manual approval. Three failures cause a 60-second cooldown.
+
+Enable/disable/remove-password changes are saved only with Save settings. Current-user DPAPI protection means a verifier copied to another Windows account may not decrypt; set a fresh password under that account. Plaintext passwords are never stored. No background Windows service or UAC bypass is introduced. Internet connectivity is the next phase, not part of this password fix; see docs/InternetPlan.md in the repository.

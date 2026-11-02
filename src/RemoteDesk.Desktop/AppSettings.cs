@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using RemoteDesk.Security;
 using RemoteDesk.Files;
 namespace RemoteDesk.Desktop;
@@ -23,6 +24,8 @@ public sealed class AppSettings
     public int DefaultWidth { get; set; } = 1440;
     public static string DataDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RemoteDesk");
     public static string TransferCache => Path.Combine(DataDirectory, "Transfers");
+    [JsonIgnore] public string? LoadWarning { get; private set; }
+    private static readonly SemaphoreSlim SaveGate = new(1, 1);
     private static string SettingsPath => Path.Combine(DataDirectory, "settings-v3.json");
     public static AppSettings Load()
     {
@@ -31,6 +34,10 @@ public sealed class AppSettings
             if (File.Exists(SettingsPath) && new FileInfo(SettingsPath).Length < 131072)
             {
                 var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsPath)) ?? new();
+                // An unavailable USB/network share must not discard unrelated password/trust settings.
+                try { settings.ValidateSharedFolder(); }
+                catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
+                { settings.SharedFolder = ""; settings.LoadWarning = "The saved shared folder is unavailable or unsafe. File serving is disabled until you choose another folder; password and trust settings were preserved."; }
                 settings.Validate(); return settings;
             }
         }
@@ -42,6 +49,13 @@ public sealed class AppSettings
         if (Port is < 1024 or > 65535 || DefaultFps is < 1 or > 30 || DefaultWidth is < 640 or > 1920 || TrustedControllers is null || TrustedControllers.Count > 128)
             throw new ArgumentException("Invalid port, frame rate, width or trusted-key count.");
         TrustedControllers = TrustedControllers.Select(DeviceIdentity.NormalizeId).Distinct().ToList();
+        if (ProtectedPasswordVerifier?.Length > 8192) throw new ArgumentException("Invalid saved password verifier. Remove or replace the saved password.");
+        if (PasswordAccess && string.IsNullOrEmpty(ProtectedPasswordVerifier))
+            throw new ArgumentException("Set a unique password of at least 16 characters before enabling automatic approval. Pairing can be completed afterwards.");
+        ValidateSharedFolder();
+    }
+    private void ValidateSharedFolder()
+    {
         SharedFolder ??= "";
         if (SharedFolder.Length > 1024 || (SharedFolder.Length > 0 && !Directory.Exists(SharedFolder))) throw new ArgumentException("Choose an existing shared folder or leave it empty.");
         if (SharedFolder.Length > 0)
@@ -55,14 +69,23 @@ public sealed class AppSettings
             try { SharedFolderService.ValidateRoot(full); }
             catch (UnauthorizedAccessException) { throw new ArgumentException("The shared folder and its ancestors cannot be symbolic links/reparse points."); }
         }
-        if (PasswordAccess && (string.IsNullOrEmpty(ProtectedPasswordVerifier) || TrustedControllers.Count == 0))
-            throw new ArgumentException("Password access needs a 16+ character password and at least one explicitly trusted Controller (approve and check Trust first).");
     }
     public async Task SaveAsync()
     {
-        Validate(); Directory.CreateDirectory(DataDirectory);
-        string temporary = SettingsPath + ".tmp";
-        await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
-        File.Move(temporary, SettingsPath, true);
+        Validate();
+        string json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
+        await SaveGate.WaitAsync();
+        string temporary = SettingsPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            Directory.CreateDirectory(DataDirectory);
+            await File.WriteAllTextAsync(temporary, json);
+            File.Move(temporary, SettingsPath, true);
+        }
+        finally
+        {
+            try { if (File.Exists(temporary)) File.Delete(temporary); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            SaveGate.Release();
+        }
     }
 }

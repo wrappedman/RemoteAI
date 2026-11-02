@@ -6,12 +6,23 @@ public static class PasswordVerifier
 {
     public static string Create(string password)
     {
-        if (password.Length is < 16 or > 256) throw new ArgumentException("Use a unique password with at least 16 characters (maximum 256).");
+        if (password.Length is < 16 or > 256 || string.IsNullOrWhiteSpace(password)) throw new ArgumentException("Use a unique password with at least 16 characters (maximum 256).");
         byte[] salt = RandomNumberGenerator.GetBytes(32);
         byte[] hash = Rfc2898DeriveBytes.Pbkdf2(password, salt, 600000, HashAlgorithmName.SHA256, 32);
         byte[] bytes = [..salt, ..hash];
         try { return Convert.ToBase64String(Transform(bytes, true)); }
         finally { CryptographicOperations.ZeroMemory(bytes); CryptographicOperations.ZeroMemory(hash); }
+    }
+    public static bool IsUsable(string? encrypted)
+    {
+        if (string.IsNullOrEmpty(encrypted) || encrypted.Length > 8192) return false;
+        try
+        {
+            byte[] bytes = Transform(Convert.FromBase64String(encrypted), false);
+            try { return bytes.Length == 64; }
+            finally { CryptographicOperations.ZeroMemory(bytes); }
+        }
+        catch (Exception ex) when (ex is CryptographicException or FormatException) { return false; }
     }
     public static bool Verify(string encrypted, string password)
     {

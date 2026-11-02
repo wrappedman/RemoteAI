@@ -1,4 +1,4 @@
-# Acceptance — 0.3.1
+# Acceptance — 0.3.2
 
 ## Automated gates
 
@@ -35,3 +35,8 @@ Record OS builds/security patches, GPU/driver, DPI/HDR/primary resolution, adapt
 10. Animation grant/denial, normal restore, user changes/crash recovery. Document accessibility implications; no persisted registry changes promised.
 
 Not done: H.264/WebRTC, Internet registry/ICE/TURN/relay, advanced monitor/cursor pipeline, audio, clipboard sync, background unattended service, automatic reconnect/job queue, actual SMB mapping, central audit/MFA/revocation, signed installer/secure updates.
+
+
+### 0.3.2 password regressions
+
+Actual Settings Save before any pairing; failed validation preserves draft and previous stored verifier; successful Save stores no plaintext and reloads a usable DPAPI verifier. Real MainWindow/Agent/TLS: unknown Controller with the correct password rejected without popup, explicit manual Trust pairing, subsequent automatic login without popup, configured input/files subset (never automatic effects), wrong passwords/disabled access fail closed, three-failure Host cooldown. Injected monotonic clock checks cooldown expiry without a 60-second sleep. Offline shared-folder startup preserves password/trust; manual pairing does not erase a password draft. Numeric first-contact password attempts fail before discovery/transmission without a saved Host pin.

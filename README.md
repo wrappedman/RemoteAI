@@ -1,10 +1,10 @@
-# RemoteDesk 0.3.1 — remote workspace
+# RemoteDesk 0.3.2 — remote workspace
 
 English Windows WPF client with numeric LAN discovery, per-device tabs, explicit permissions, mouse/keyboard control and resumable file transfer. Design follows the supplied `01.jpg`; **Connection center is separate from full-size session tabs**.
 
 ## Run
 
-Extract `run/RemoteDesk-win-x64-portable.zip` and launch `RemoteDesk.exe`. Runtime included. Update **both endpoints** to 0.3.1 / protocol v4; older builds intentionally fail closed. Alternatively run the framework-dependent EXE with all companions and .NET 10 Desktop Runtime x64.
+Extract `run/RemoteDesk-win-x64-portable.zip` and launch `RemoteDesk.exe`. Runtime included. Update **both endpoints** to 0.3.2 / protocol v4; older builds intentionally fail closed. Alternatively run the framework-dependent EXE with all companions and .NET 10 Desktop Runtime x64.
 
 1. Open the app on both PCs on a trusted private LAN. Enter the Host's 12-digit ID in Connection center.
 2. Choose requested Control / Files / Animations permissions. Host explicitly chooses which to grant; screen approval alone never grants input or files.
@@ -45,3 +45,5 @@ powershell -ExecutionPolicy Bypass -File scripts/Build.ps1
 Console suites, not `dotnet test` adapters. Tests cover actual TLS/binary frames, input permission, path sandbox, interrupted/resumed uploads and downloads, hashes, numeric discovery, DPAPI/PBKDF2 verifier and Windows UI multi-tab independent sessions with the **production Host runtime**. CI deliberately does **not** physically block a runner's keyboard or approve UAC; those are manual release gates. See `run/BUILD-INFO.md`, `run/Performance.txt` (when generated), [Acceptance](docs/Acceptance.md), [Security](docs/Security.md), [Files](docs/FileTransfer.md), [Performance](docs/Performance.md).
 
 Modules: Core, Protocol, Security, Transport, Agent, Discovery, Capture, **Files**, **Windows**, Desktop. Intended baseline: updated Windows 11 x64, .NET 10 LTS. Physical OS/GPU/DPI/security certification pending. Unsigned development builds; existing [LICENSE](LICENSE) applies.
+
+Password setup/login workflow and next Internet deployment phase: see [Internet plan](docs/InternetPlan.md). No public directory/relay is deployed in this build.
