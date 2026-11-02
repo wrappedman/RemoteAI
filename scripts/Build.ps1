@@ -14,6 +14,8 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if (-not $SkipPortable) {
     dotnet publish src/RemoteDesk.Desktop -c Release -r win-x64 --self-contained true -o artifacts/portable -p:DebugType=None -p:DebugSymbols=false
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Copy-Item run/README.md artifacts/portable/README.md
+    Copy-Item scripts/Enable-LanFirewall.ps1 artifacts/portable/Enable-LanFirewall.ps1
     Compress-Archive -Path artifacts/portable/* -DestinationPath run/RemoteDesk-win-x64-portable.zip -CompressionLevel Optimal -Force
 }
 Get-ChildItem run -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' -and $_.Name -ne 'BUILD-INFO.md' } | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash)  $($_.Name)" } | Set-Content run/SHA256SUMS.txt

@@ -1,17 +1,10 @@
-# Execution roadmap
+# Roadmap after v0.2
 
-| Phase | Deliverable | Gate |
-| --- | --- | --- |
-| 0 | Modules, identity decisions, v1 wire contract, threat model | Implemented in this branch; review pending |
-| 1 | Attended authenticated LAN channel, English workspace, tests, Windows build | Automated gates + real two-PC acceptance; manual gate pending |
-| 2 | Capture interface + Windows Graphics Capture / DXGI fallback | Supported GPU/OS/DPI tests; no network assumptions |
-| 3 | H.264 media pipeline with bounded queues and adaptive quality | Real latency, CPU, bandwidth measurements |
-| 4 | Mouse/keyboard data path and per-action permission checks | UAC/session boundary review; local user can revoke immediately |
-| 5 | ASP.NET Core identity/signaling, ICE/STUN/TURN Hybrid connectivity | Endpoint key binding; direct and relay network matrix; relay cannot decrypt |
-| 6 | Security hardening | Key lifecycle, revocation, MFA, rate limits, fuzzing, independent audit |
-| 7 | Files, clipboard, managed devices | Separate opt-in permissions and data handling policies |
-| 8 | Release | Signed installer/binaries, authenticated updates/rollback protection, measured support matrix |
-
-File transfer, unattended access, multi-session, privileged service and advanced management are not MVP shortcuts. A future service needs authenticated IPC to the active user session and must never turn transport consent into blanket administrative authority.
-
-A beautiful workspace is not the phase-one success criterion. The current UI intentionally has no fake remote desktop: connectivity, identity, consent, bounded framing and teardown must be accepted before capture work begins.
+- Phase 0/1 foundation: modular endpoint, TLS identity/consent, protocol/state machine and Windows builds are implemented; final physical two-PC/security acceptance remains required.
+- v0.2 responds to the requested usability change: local numeric IDs and initial **view-only GDI/JPEG** desktop capture/transport/rendering. This is a basic capture/media vertical slice, not completion of the eventual performance/media architecture.
+- Next capture/media work: physical GPU/DPI/HDR tests, Windows Graphics Capture/DXGI, cursor/multi-monitor handling, bounded H.264 pipeline, measured latency/bandwidth and frame pacing.
+- Input phase: explicitly requested per-action mouse/keyboard permissions and Windows security/session/UAC boundary review. No input capability is implicitly granted by current screen consent.
+- Internet Hybrid phase: deploy authenticated registry + collision-free IDs, signaling with endpoint key binding, ICE/STUN/TURN and encrypted relay fallback. Current numbers only resolve on the LAN; no server is deployed/configured.
+- Security phase: rate limits, pairing protocol review for hostile networks, central key lifecycle/revocation/MFA, codec fuzzing, independent security audit.
+- Later: separate opt-in files/clipboard/device management; authenticated IPC/service design only if justified. Never treat a screen approval as blanket administration.
+- Release: code signing, installer, authenticated updates/rollback protection, measured/certified Windows support matrix. All current packages are unsigned development previews.

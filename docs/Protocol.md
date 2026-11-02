@@ -1,41 +1,28 @@
-# LAN protocol v1
+# LAN protocol v2 — consent + primary display
 
-TCP → TLS 1.2/1.3 with mutual certificates → framed UTF-8 JSON. There is no plaintext application fallback.
+**Both endpoints must update.** Version 1 (heartbeat only) is rejected. Framing remains 4-byte signed big-endian length followed by strict UTF-8 JSON, over mutually authenticated TLS 1.2/1.3. No plaintext fallback.
 
-## Frame
+Envelope: required `version`, `messageId` UUID, `sessionId` UUID, positive per-direction `sequence`, string `type`, object `payload`. Case-sensitive fields, no unknown or duplicate JSON members, depth ≤8. Payload properties: optional `deviceId`, `displayName`, `viewScreen` boolean (default false), `jpeg` byte array encoded as base64.
 
-4-byte signed big-endian payload length, then exactly that many bytes. Valid length: 2–16,384 inclusive. Reject length before allocation. Truncation/EOF closes the connection. JSON depth ≤ 8, case-sensitive names, no unknown members, no duplicate properties, string enums only. Invalid UTF-8/JSON, enum values or fields terminate the session.
-
-```json
-{
-  "version": 1,
-  "messageId": "7f870dc9-7e18-471f-829c-c54594b43d9a",
-  "sessionId": "90bf57d8-2fc4-467d-a9c9-7c8d16a88a85",
-  "sequence": 1,
-  "type": "ConnectionRequest",
-  "payload": {
-    "deviceId": "64_UPPERCASE_HEX_CHARACTERS_OF_SHA256_SPKI",
-    "displayName": "WORKSTATION"
-  }
-}
-```
-
-The sample `deviceId` is explanatory; real IDs are exactly 64 hex characters. Display name: 1–64 characters, non-whitespace, no control characters. It is **self-reported**, never a trust decision.
-
-`payload` is always an object. Non-request messages have `deviceId`/`displayName` null or absent; other values are rejected. All UUIDs must be nonempty. The initiator generates a new session UUID on every connection. Sequences are independent per direction, start at 1, and must increment by exactly 1. A MessageGuard enforces the session UUID, next sequence and unique message ID. At most 10,000 IDs per direction are retained; reaching the cap terminates the session instead of growing memory indefinitely. TLS itself supplies transport record integrity and replay protection; application checks add state-machine safeguards, not a replacement for TLS.
+Limits: total JSON frame 2–393,216 bytes; JPEG ≤262,144 bytes; JPEG encoded dimensions 1–1600 by 1–1000. Header validation precedes native decoding. Only 8-bit SOF0/SOF1/SOF2 JPEG dimensions are accepted. The capture implementation emits at most 1440×900. Truncated/invalid frames close the session. Strict sequence/session checks and unique message IDs are maintained for up to 100,000 messages per direction; reaching the bound closes the session and requires fresh approval. No unbounded replay cache.
 
 ## Handshake
 
-1. Controller validates the Host certificate SPKI against the full pre-entered ID, including certificate validity and RSA strength.
-2. Host requires a client certificate. TLS proves possession of its private key; it is NOT authorized yet.
-3. Controller sends `ConnectionRequest` (sequence 1).
-4. Host checks payload ID equals the actual client TLS SPKI fingerprint.
-5. Host presents that full fingerprint, unverified name and address to its local user.
-6. Only explicit approval sends `Approval` (Host sequence 1); rejection/expiry sends `Rejection` and closes. No unattended fallback exists.
-7. Connected peers may exchange only `Ping`, `Pong` and `Disconnect`. A request or approval repeated in this state is a protocol violation.
+1. Controller pins the full Host SPKI, obtained through signed local discovery or independently verified Advanced setup. Host requires a client certificate (proof of possession, not authorization).
+2. Controller sends `ConnectionRequest` sequence 1 with its TLS-bound device ID, unverified display name, and `viewScreen` request. Client certificates and payload identities must match.
+3. Host prompts its local user, explicitly showing the requested **view primary display** permission. No media producer is started before approval. Consent expires in 45 seconds, default deny.
+4. Host sends `Approval` or `Rejection`, sequence 1. Approval echoes the granted view-screen flag; rejection has no capabilities and closes. Controller rejects unsolicited screen grants.
+5. Only the approved Host may send `ScreenFrame` / `ScreenUnavailable`, and only the requesting Controller may receive them. A controller sending screen data, or any sender without a grant, is rejected. No input/file/clipboard message types exist.
 
-`Ping` causes `Pong`; each peer also pings every 3 seconds. No arbitrary commands, screen content, file data or input events are supported. A valid frame must complete within 12 seconds of starting each connected read. A peer that stays silent, disconnects mid-frame or sends malformed data loses the session. Normal local disconnect sends `Disconnect`, then closes TLS/TCP. Reconnect creates fresh transport, UUID, sequences and approval.
+A six-digit session reference derives from the fresh session UUID and both full device fingerprints. It supports human correlation, **not independent authentication**; its inputs are not TLS exporter secrets and a malicious peer controls its own session/identity. Do not replace trusted full-key verification with this short code on a hostile network.
 
-## Future evolution
+## Connected messages
 
-Reject unsupported version numbers, rather than silently downgrading. Add explicit capability negotiation before enabling future media/input messages. A future authenticated protocol must bind WebRTC fingerprints to pinned or centrally verified device keys. LAN v1 must never be presented as an Internet relay protocol.
+- `Ping` / `Pong`: empty payload, periodic 3-second heartbeat.
+- `Disconnect`: empty payload, closes the session.
+- `ScreenFrame`: only nonempty `jpeg` payload; no extra name, device ID or grant flags.
+- `ScreenUnavailable`: empty payload; Controller clears its image and explains the failure.
+
+Writes share one semaphore and a five-second deadline; frames cannot interleave. Screen capture **awaits the send** before taking another frame, then waits 250 ms. No unbounded producer queue. The renderer retains only the latest received JPEG and decodes on a 125-ms UI tick; excess intermediate frames are replaced. A frame-less UI shows waiting/unavailable/stale status instead of equating transport connectivity with working video. Disconnect clears the image and cancels/disposes the capture producer before releasing transport resources.
+
+Read deadline 12 seconds, initial dial/TLS/request deadline 10 seconds, Controller approval wait 60 seconds. Media and heartbeat share TLS/TCP; head-of-line blocking and JPEG bandwidth are known baseline limitations. H.264/WebRTC needs a later media transport design, not a claim made by this protocol.

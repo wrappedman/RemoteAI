@@ -167,7 +167,7 @@ public partial class MainWindow : Window
     private async Task<bool> AskApprovalAsync(ApprovalRequest request, CancellationToken token)
     {
         _approval = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        ApprovalDetails.Text = $"Device: {NumericDeviceId.Format(NumericDeviceId.FromFingerprint(request.DeviceId))}\nName (unverified): {request.DisplayName}\nVerification code: {request.VerificationCode}\nRequested: {(request.ViewScreen ? "VIEW YOUR PRIMARY DISPLAY" : "protocol only")}\nExpires in 45 seconds.";
+        ApprovalDetails.Text = $"Device: {NumericDeviceId.Format(NumericDeviceId.FromFingerprint(request.DeviceId))}\nName (unverified): {request.DisplayName}\nSession code: {request.VerificationCode}\nRequested: {(request.ViewScreen ? "VIEW YOUR PRIMARY DISPLAY" : "protocol only")}\nExpires in 45 seconds.";
         ApproveButton.Content = request.ViewScreen ? "Approve & share my screen" : "Approve protocol only";
         ApprovalPanel.Visibility = Visibility.Visible; Activate();
         _ = Dispatcher.BeginInvoke(new Action(() => ApprovalPanel.BringIntoView()));
@@ -207,7 +207,7 @@ public partial class MainWindow : Window
             var session = await SecureSession.ConnectAsync(address, port, pin, DisplayName(), _identity, SetState, _operation.Token,
                 requestScreen: true, verificationCode: code => Ui(() =>
                 {
-                    PairingText.Text = $"Verification code: {code} — compare this with the Host before they approve.";
+                    PairingText.Text = $"Session code: {code} — compare this with the Host before they approve.";
                     PairingPanel.Visibility = Visibility.Visible;
                 }));
             if (_closing || _operation.IsCancellationRequested) { await session.DisposeAsync(); ResetState(); return; }
@@ -232,7 +232,7 @@ public partial class MainWindow : Window
     private void AttachSession(SecureSession session, bool owned)
     {
         _session = session; CipherText.Text = session.Cipher;
-        PairingText.Text = $"Verified session code: {session.VerificationCode}";
+        PairingText.Text = $"Session code: {session.VerificationCode}";
         PeerText.Text = $"Peer: {NumericDeviceId.Format(NumericDeviceId.FromFingerprint(session.PeerId))} · {session.PeerName}";
         if (session.CanReceiveScreen)
         {
@@ -245,14 +245,16 @@ public partial class MainWindow : Window
                 if (!ReferenceEquals(_session, session)) return;
                 _receivedFrames = 0; Interlocked.Exchange(ref _latestFrame, null);
                 RemoteImage.Source = null; ViewerStatus.Text = "Host cannot capture this desktop. Ask them to unlock their normal Windows desktop and reconnect.";
-                StateText.Text = "Screen unavailable";
+                StateText.Text = "Screen unavailable"; TopStatus.Text = "●  Screen unavailable";
             });
             _renderTimer.Start();
+            _ = Dispatcher.BeginInvoke(new Action(() => ViewerPanel.BringIntoView()));
         }
         if (session.CanSendScreen)
         {
             SharingPanel.Visibility = Visibility.Visible;
             StateText.Text = "Starting screen share";
+            _ = Dispatcher.BeginInvoke(new Action(() => SharingPanel.BringIntoView()));
             session.StartScreenProducer(token => ShareScreenAsync(session, token));
         }
         Log("Authenticated session approved; screen permission enforced independently of transport state.");
@@ -300,7 +302,10 @@ public partial class MainWindow : Window
         if (jpeg is null)
         {
             if (_receivedFrames > 0 && DateTimeOffset.UtcNow - _lastFrame > TimeSpan.FromSeconds(5))
+            {
                 ViewerStatus.Text = "No recent screen frame — the last image may be stale.";
+                StateText.Text = "Screen paused"; TopStatus.Text = "●  Waiting for screen frames";
+            }
             return;
         }
         try
@@ -367,7 +372,7 @@ public partial class MainWindow : Window
     }
     private void Home_Click(object sender, RoutedEventArgs e) => TargetIdBox.Focus();
     private void Guide_Click(object sender, RoutedEventArgs e) => MessageBox.Show(this,
-        "Run v0.2 on both devices on the SAME PRIVATE LAN. Share the Host's 12-digit ID. Enter that ID and select View remote screen. Compare the six-digit verification code on both devices, then the Host selects Approve & share my screen.\n\nAllow TCP 45831 and UDP 45832 on Private networks if Windows Firewall blocks the app. See run/README.md and scripts/Enable-LanFirewall.ps1. Do not open these ports to the internet.\n\nThis version streams the primary display (JPEG, up to about 4 FPS). It is VIEW ONLY: no mouse, keyboard, files, clipboard, unattended access or UAC/Secure Desktop. Internet ID routing and relay require a deployed server and are not configured.",
+        "Run v0.2 on both devices on the SAME PRIVATE LAN. Share the Host's 12-digit ID. Enter that ID and select View remote screen. Compare the six-digit session code on both devices, then the Host selects Approve & share my screen.\n\nAllow TCP 45831 and UDP 45832 on Private networks if Windows Firewall blocks the app. See run/README.md and scripts/Enable-LanFirewall.ps1. Do not open these ports to the internet.\n\nThis version streams the primary display (JPEG, up to about 4 FPS). It is VIEW ONLY: no mouse, keyboard, files, clipboard, unattended access or UAC/Secure Desktop. Internet ID routing and relay require a deployed server and are not configured.",
         "RemoteDesk · ID connection & screen sharing", MessageBoxButton.OK, MessageBoxImage.Information);
     private async void Window_Closing(object? sender, CancelEventArgs e)
     {

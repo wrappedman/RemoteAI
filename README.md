@@ -1,66 +1,50 @@
-# RemoteDesk
+# RemoteDesk v0.2 — numeric LAN IDs + live desktop viewing
 
-A modular Windows remote-support project. **The current milestone is phase 1: attended, authenticated, encrypted LAN sessions — not desktop streaming.**
+English WPF workspace inspired by `01.jpg`, persistent device keys, attended consent, encrypted LAN desktop viewing.
 
-The English WPF workspace follows the supplied [`01.jpg`](01.jpg): dark device rail, blue-accented workspace tab, command strip and session area. Unlike a mock remote desktop, it displays the real device identity, incoming approval, connection state and local audit events. Future screen/input controls are visibly disabled.
+## Run
 
-## Download / run
+Extract **`run/RemoteDesk-win-x64-portable.zip`** to a folder and run `RemoteDesk.exe` inside it. Runtime included. Alternatively use `run/RemoteDesk.exe` with all its companion files and .NET 10 Desktop Runtime x64 installed. Both endpoints must use v0.2; the old v1 protocol is deliberately rejected.
 
-See [`run/README.md`](run/README.md). The Windows build produces:
+1. Open RemoteDesk on both Windows devices on the **same private LAN**. Availability is on while the visible app is running.
+2. Share the Host's **12-digit RemoteDesk ID**, e.g. `123 456 789 012`.
+3. Enter that ID on the Controller and choose **View remote screen**. No IP or fingerprint entry is required in the default flow.
+4. Compare the displayed session code and confirm the intended requester. The Host explicitly selects **Approve & share my screen**.
+5. The Controller displays the actual primary desktop. **Viewing remote desktop** is shown only after an image has decoded, never merely because TLS connected.
+6. **Disconnect**, **Stop sharing**, disabling Host availability, or closing the Host app ends transmission.
 
-- `run/RemoteDesk.exe` plus framework-dependent companion files (.NET 10 Desktop Runtime x64 required).
-- `run/RemoteDesk-win-x64-portable.zip`: extract first; includes the runtime and runs without a separate .NET installation.
-- Checksums and build provenance.
+Numeric IDs resolve through signed UDP discovery **on the LAN only**. They are not Internet-routable AnyDesk accounts. There is no deployed registry/signaling/relay server. Broadcast discovery cannot cross routed subnets, isolated Wi-Fi clients, or most VPNs. See [network setup](docs/Discovery.md).
 
-Build output is unsigned. Review the security model before exposing a listener. A successful CI startup/render/loopback test is **not** two-PC LAN acceptance or a security audit.
+## What changed from v0.1
 
-## Implemented
+- Persistent, formatted numeric IDs derived from device public keys; signed, nonce-bound LAN discovery resolves address and full TLS pin automatically.
+- Advanced manual IP/full-fingerprint connection retained for networks that block discovery.
+- Actual GDI primary-display capture, JPEG encoding, bounded encrypted transport and WPF rendering.
+- Explicit screen consent and directional capability enforcement: only the approved Host can send frames.
+- Backpressure, latest-frame rendering, paused/unavailable states and immediate image clearing on disconnect.
+- End-to-end Windows UI test drives numeric discovery → TLS approval → actual desktop capture → JPEG transfer → visible decoded image → disconnect.
 
-- Persistent RSA-3072 device identity; SHA-256 of DER SubjectPublicKeyInfo is the device ID.
-- Non-exportable, user-scoped CNG private key and Windows Current User certificate store.
-- TCP with TLS 1.2/1.3 and client certificates; exact Host fingerprint pinning, no insecure bypass.
-- Local Host approval/rejection with a full Controller fingerprint; default deny, 45-second expiry.
-- Versioned, size-bounded framed JSON; sequence, session and replay checks.
-- One session at a time, cancellation, periodic heartbeat, disconnect detection and orderly teardown.
-- Local saved targets/search, real network addresses, copyable public identity, capped in-memory activity log.
-- Cross-platform core/protocol/TLS console test suites, Windows CNG tests and WPF startup smoke test.
+## Current limits
 
-## Deliberately not implemented
+View only: no mouse/keyboard control, clipboard, files, unattended access, UAC/Secure Desktop support, sound, multi-monitor switching or Internet relay. Capture is a compatibility-first GDI/JPEG baseline, **not H.264/WebRTC**: primary monitor, at most 1440×900, quality adjusted to stay under 256 KiB, at most about 4 FPS (slower on slow hosts/links). Protected content, locked desktops and HDR can appear black or stale; no bypass is attempted. This is not yet a low-latency video/remote-control release.
 
-Desktop capture/streaming, mouse/keyboard injection, clipboard, files, unattended access, background Windows Service, Internet signaling/STUN/TURN/relay, backend accounts, automatic reconnect and update installation. Every reconnect requires fresh approval. There is no hidden input capability or UAC bypass.
+IDs are **addresses, not passwords or globally allocated unique numbers**. First-contact discovery is not a central trust authority. For hostile networks, verify the full fingerprint using Advanced setup and a trusted channel. Saved verified keys are pinned on subsequent ID connections. See [Security](docs/Security.md).
 
-## Build from source
+## Build / test
 
-Use a supported Windows 11 x64 machine, .NET 10 SDK (Visual Studio with the WPF workload is optional):
+.NET 10 LTS SDK, Windows x64:
 
 ```powershell
 dotnet build RemoteDesk.sln -c Release
-dotnet run --project tests/RemoteDesk.Core.Tests -c Release
-dotnet run --project tests/RemoteDesk.Protocol.Tests -c Release
-dotnet run --project tests/RemoteDesk.Security.Tests -c Release
-dotnet run --project tests/RemoteDesk.Desktop.Tests -c Release -- artifacts/workspace.png
+dotnet run --project tests/RemoteDesk.Core.Tests -c Release --no-build
+dotnet run --project tests/RemoteDesk.Protocol.Tests -c Release --no-build
+dotnet run --project tests/RemoteDesk.Security.Tests -c Release --no-build
+dotnet run --project tests/RemoteDesk.Desktop.Tests -c Release --no-build -- artifacts/workspace.png
 powershell -ExecutionPolicy Bypass -File scripts/Build.ps1
 ```
 
-Tests are ordinary console executables with failing exit codes, intentionally requiring no third-party test packages. `dotnet test` is not their runner. The security suite establishes actual TLS connections on loopback; Windows additionally checks persisted non-exportable CNG keys. No UI/network behavior is claimed validated on Linux.
+Tests are console executables, not `dotnet test` adapters. Security tests use real TLS and UDP. Desktop tests use real Windows capture/encoding and an isolated auto-approving **test Host**; production approval is not bypassed. A CI end-to-end test is not a substitute for acceptance on two physical Windows PCs.
 
-## Structure
+Projects: Desktop, Agent, Core, Protocol, Security, Transport, **Discovery**, **Capture**. Core/transport remain independent of WPF/capture. The capture library is Windows-specific.
 
-| Project | Responsibility |
-| --- | --- |
-| Desktop | English WPF workspace and explicit user consent |
-| Agent | Unprivileged incoming LAN listener and single-session admission |
-| Core | Legal session transitions and default-deny capability model |
-| Protocol | Wire envelopes, framing, validation, replay/order guard |
-| Security | Device identity, key protection and certificate pin validation |
-| Transport | Mutual TLS, protocol handshake, heartbeat and teardown |
-
-See [Architecture](docs/Architecture.md), [Protocol](docs/Protocol.md), [Security](docs/Security.md), [Acceptance](docs/Acceptance.md), and [Roadmap](docs/Roadmap.md).
-
-## Supported baseline
-
-.NET 10 LTS; Windows 11 x64 24H2/25H2 with current security updates is the intended acceptance baseline, not yet a hardware-certified support matrix. Windows 10 (including ESU), ARM64, Server, Secure Desktop/UAC and multi-user scenarios require separate validation. No administrator privileges are requested. Incoming TCP 45831 is off until explicitly enabled; the app does not modify firewall rules.
-
-## License
-
-See the existing [LICENSE](LICENSE). This project has its own identity; the supplied reference is design inspiration, not a shipped third-party product interface or simulated remote session.
+Build provenance and pending manual gates: `run/BUILD-INFO.md`, [Acceptance](docs/Acceptance.md). Target baseline: updated Windows 11 x64 24H2/25H2; physical OS/GPU/DPI certification pending. Windows 10/ESU, Server and ARM64 require independent validation. Builds are unsigned. Existing [LICENSE](LICENSE) applies.

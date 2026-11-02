@@ -55,6 +55,9 @@ jobs:
           dotnet publish src/RemoteDesk.Desktop -c Release -r win-x64 --self-contained true -o artifacts/portable -p:DebugType=None -p:DebugSymbols=false
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item run/README.md artifacts/run/README.md
+          Copy-Item run/README.md artifacts/portable/README.md
+          Copy-Item scripts/Enable-LanFirewall.ps1 artifacts/portable/Enable-LanFirewall.ps1
+          Copy-Item scripts/Enable-LanFirewall.ps1 artifacts/run/Enable-LanFirewall.ps1
           Compress-Archive -Path artifacts/portable/* -DestinationPath artifacts/run/RemoteDesk-win-x64-portable.zip -CompressionLevel Optimal
           Get-ChildItem artifacts/run -File | Where-Object Name -ne SHA256SUMS.txt | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash)  $($_.Name)" } | Set-Content artifacts/run/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4

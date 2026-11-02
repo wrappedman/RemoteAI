@@ -1,43 +1,35 @@
-# Security model and limitations
+# Security — v0.2 development preview
 
-## Scope and assumptions
+## Key custody and TLS
 
-Phase one is for a trusted private LAN and an interactive Windows user. It is a development preview, not a production remote-control product. Local compromise of either endpoint or its user account is outside the protections provided here. Do not expose TCP 45831 to the public internet. Rate limits, central revocation, MFA, remote attestation and security review remain future work.
+Persistent RSA-3072 key `RemoteDesk.DeviceIdentity.v1` in the current user's Microsoft Software Key Storage Provider, signing-only usage, non-exportable. Self-signed certificate (server/client EKUs, digital signature), one-year validity, stored in CurrentUser/My and renewed with the same key. Full identity = SHA-256 of DER SPKI. Private keys are never serialized to app files or logs. TPM and central revocation are not implemented. Same-user malware can still request signatures from a non-exportable software key; protect the Windows profile.
 
-## Device identity and key custody
+TLS 1.2/1.3 via SslStream; no custom encryption, plaintext mode or certificate-bypass switch. Controller uses an exact SPKI pin plus validity/RSA strength checks. Host initially accepts a client certificate only for key-possession proof and a pending **untrusted** request; the local user must authorize each session. Names and numeric IDs are not account authentication.
 
-- RSA-3072 key named `RemoteDesk.DeviceIdentity.v1` in the current user's Microsoft Software Key Storage Provider.
-- Key is marked non-exportable with signing usage. Private key is never serialized into app files or logs.
-- Self-signed certificate, SHA-256/RSA PKCS#1 signature, digital-signature usage and server/client authentication EKUs.
-- Certificate is stored in CurrentUser/My and renewed with the same CNG key near expiry (one-year certificate validity).
-- Device ID = uppercase hex SHA-256 of DER SubjectPublicKeyInfo, not a friendly short number or password.
-- TPM-backed storage is not implemented; non-exportable software keys do not prevent malware running as the same user from requesting signatures.
-- No PFX import/export, no hardcoded shared secrets, no token store, and no account authentication yet.
+## Numeric discovery trust
 
-## Mutual authentication and consent
+Signed, nonce-bound UDP responses bind a local number to a public certificate, then TLS proves possession of that key. A signature from a self-signed key is **not a central identity authority**. The numeric address has a finite ~40-bit collision space, is public, and is not a password. First-contact trust depends on the trusted LAN and correct Host approval; for hostile networks exchange full fingerprints independently and use Advanced pinning. A changed saved full key for the same numeric ID fails closed. Multiple verified keys claiming one number within the lookup window are rejected.
 
-Controller must obtain the Host's full fingerprint through an independent trusted channel and enter it explicitly. Certificate name/PKI-chain errors are deliberately replaced by exact SPKI pinning for self-signed endpoint certificates. Certificate presence, validity and minimum RSA strength are still checked. Arbitrary certificates are never accepted by the Controller.
+The six-digit displayed session code is for human correlation only. It hashes public identities/session UUID, not shared TLS exporter material, and is not a PAKE or sufficient standalone MITM defense. It must not substitute for a full trusted fingerprint where adversarial LAN peers are a concern. Do not blindly approve a matching-looking name or incoming dialog.
 
-The Host initially accepts a qualifying client certificate only for TLS key-possession proof and an **untrusted pending request**. Authorization requires its local user to compare the full displayed fingerprint with the Controller device's fingerprint, then explicitly approve. The peer's machine name and IP are not trusted identity. If a user blindly approves a fingerprint, the application cannot protect them from social engineering. No prior approval is persisted. Approval grants only the currently implemented protocol/heartbeat channel, not screen viewing or input access.
+Discovery exposes public IDs, public certificates and machine names on the LAN. Replies are rate-limited and datagrams bounded, but query floods/handshake-slot denial of service remain possible. Full anti-abuse controls require further hardening.
 
-TLS 1.2/1.3 use the operating system's secure cipher policies. Renegotiation is disabled. No custom encryption, certificate bypass toggle or unauthenticated plaintext endpoint exists. Current TLS API behavior is verified by real loopback tests, not by application-only message mocks.
+## Screen privacy and permissions
 
-## Abuse bounds
+The Controller explicitly requests primary-screen viewing. The Host sees this permission and chooses **Approve & share my screen**; rejection/45-second expiry sends no screen frames. Only that Host may send JPEGs; only the requesting Controller may receive them. No mouse, keyboard, clipboard, file, audio or administrative commands exist. Disabling availability or disconnecting/closing stops the Host producer. A visible banner and Stop sharing action remain in the Host UI.
 
-16 KiB frame limit before allocation, strict JSON, bounded nesting, no unknown/duplicate fields, required envelope checks, per-session sequencing and duplicate ID rejection. The application caps frames per session, audit history and saved targets. Handshakes, consent, reads and writes have deadlines. One session/handshake at a time and listener default-off reduce exposure but **do not solve denial of service**; an attacker can occupy the single handshake/approval slot. Production needs per-source rate limits, consent spam suppression and network policy.
+Frames stay in memory, are never logged/saved by the running app, and are protected by endpoint-to-endpoint TLS. The image is cleared on disconnect and capture failure is reported. A stale frame is labeled after five seconds without a new one. Full screen content can include personal data; close sensitive windows before approving. CI screenshots are test artifacts, not production recording functionality.
 
-Audit is local, in-memory, timestamped and capped. It never records payload bodies, private keys, credentials, full fingerprints or desktop content. It is not a durable/tamper-evident enterprise audit service. Local saved targets contain addresses and public fingerprints only. Malicious edits to the user's saved target file can change a future destination; protect the Windows user profile and verify pins through trusted channels.
+## Windows limitations
 
-## Windows boundary
+Runs `asInvoker` in the interactive user's desktop. No service, elevation, session switching, Secure Desktop/UAC bypass, hidden startup or unattended access. GDI capture may return black/stale images for locked/secure/protected/HDR desktops and cannot guarantee every GPU/application behaves identically. Stop sharing before locking or switching users. Only the primary monitor is supported in this baseline; cursor capture and multi-monitor selection are deferred.
 
-Application runs `asInvoker`; no elevation, service, Secure Desktop access, UAC bypass, session switching, hidden startup or unattended access. Windows input/capture security constraints will be assessed independently in later phases. No promise of control over every window or elevated application is made.
+## Bounds and release blockers
 
-## Revocation / reset
+Strict required JSON fields, no unknown/duplicate properties, size/depth caps, per-direction session/sequence/replay checks, 100,000-message lifetime, five-second serialized writes, 12-second read deadlines. JPEG size and header dimensions are validated before native decoding; screen queues are bounded to a single latest frame. Keep Windows image codecs/security updates current. Framing limits do not replace native codec security review/fuzzing.
 
-Central revocation is not implemented. To distrust a remote device, remove its saved target and refuse future requests. If a key is suspected stolen, stop using that identity, close the app, remove matching RemoteDesk certificates and the named CNG key using reviewed Windows administrative tooling, then restart to generate a new identity and redistribute the new fingerprint out-of-band. Do not delete unrelated certificates/keys. No automated destructive reset button is shipped.
+Availability now starts while the app is visible, unlike v0.1. Firewall access is never silently changed. Only allow TCP 45831 and UDP 45832 on trusted Private/LocalSubnet networks. Do not publish these ports or use v0.2 as an internet remote-control product. No registry/signaling/relay service is configured.
 
-## Release blockers
+The audit is local, capped and in-memory, not durable/tamper-evident enterprise logging. Public saved pins are in `%LOCALAPPDATA%/RemoteDesk/devices-v2.json`; protect the profile against modification. Central revocation, MFA, code signing, authenticated updates, independent security review, physical two-PC capture/network acceptance, DPI/GPU/HDR/idle/stress measurements and a certified OS matrix remain release blockers.
 
-Independent security review; two-device Windows acceptance; packet capture confirming encrypted wire data; resource measurements; anti-abuse policy; signing and secure update chain; supported OS matrix. Internet phase additionally needs authenticated signaling/key binding, ephemeral TURN credentials, endpoint-to-endpoint encryption and proof that the relay cannot decrypt media/data. TURN must never receive endpoint private keys or session plaintext.
-
-Report suspected vulnerabilities privately to repository maintainers; do not include keys, live endpoints or personal desktop data in public issues.
+To distrust a device, refuse incoming requests and remove its saved target. Suspected stolen local identity: stop the app and use reviewed Windows tooling to remove only its matching certificate/named CNG key, then redistribute the new full fingerprint out of band. Never delete unrelated keys. Report vulnerabilities privately without including personal screen data or keys.
