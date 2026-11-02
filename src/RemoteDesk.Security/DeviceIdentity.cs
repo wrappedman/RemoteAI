@@ -5,7 +5,7 @@ using System.Net.Security;
 
 namespace RemoteDesk.Security;
 
-public sealed class DeviceIdentity(X509Certificate2 certificate) : IDisposable
+public sealed class DeviceIdentity(X509Certificate2 certificate, Action? cleanup = null) : IDisposable
 {
     public X509Certificate2 Certificate { get; } = certificate;
     public string DeviceId => Fingerprint(Certificate);
@@ -70,10 +70,31 @@ public sealed class DeviceIdentity(X509Certificate2 certificate) : IDisposable
         return new(created);
     }
 
-    public static DeviceIdentity CreateEphemeral()
+    // Schannel requires a persisted provider key even for short-lived test certificates.
+    // Test-only keys have unique names and are deleted on disposal; production uses LoadOrCreateWindows.
+    public static DeviceIdentity CreateForTesting()
     {
+        if (OperatingSystem.IsWindows()) return CreateWindowsTestIdentity();
         using var rsa = RSA.Create(3072);
         return new(CreateCertificate(rsa));
+    }
+    [SupportedOSPlatform("windows")]
+    private static DeviceIdentity CreateWindowsTestIdentity()
+    {
+        string name = "RemoteDesk.Test." + Guid.NewGuid().ToString("N");
+        using var key = CngKey.Create(CngAlgorithm.Rsa, name, new CngKeyCreationParameters
+        {
+            Provider = CngProvider.MicrosoftSoftwareKeyStorageProvider,
+            ExportPolicy = CngExportPolicies.None,
+            KeyUsage = CngKeyUsages.Signing,
+            Parameters = { new CngProperty("Length", BitConverter.GetBytes(3072), CngPropertyOptions.None) }
+        });
+        using var rsa = new RSACng(key);
+        return new(CreateCertificate(rsa), () =>
+        {
+            using var temporaryKey = CngKey.Open(name, CngProvider.MicrosoftSoftwareKeyStorageProvider);
+            temporaryKey.Delete();
+        });
     }
     private static X509Certificate2 CreateCertificate(RSA rsa)
     {
@@ -84,5 +105,10 @@ public sealed class DeviceIdentity(X509Certificate2 certificate) : IDisposable
         request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(purposes, false));
         return request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddYears(1));
     }
-    public void Dispose() => Certificate.Dispose();
+    private int _disposed;
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        Certificate.Dispose(); cleanup?.Invoke();
+    }
 }

@@ -59,7 +59,7 @@ public sealed class LanAgent(DeviceIdentity identity) : IAsyncDisposable
             await session.Completion.WaitAsync(_stop.Token);
         }
         catch (Exception ex) when (ex is InvalidDataException or IOException or SocketException or AuthenticationException or OperationCanceledException or ObjectDisposedException)
-        { Audit?.Invoke(_stop.IsCancellationRequested ? "Agent stopped." : "Incoming connection ended or failed authentication."); }
+        { Audit?.Invoke(_stop.IsCancellationRequested ? "Agent stopped." : $"Incoming connection ended or failed authentication ({ex.GetType().Name})."); }
         finally { client.Dispose(); StateChanged?.Invoke(SessionState.Disconnected); }
     }
     public async ValueTask DisposeAsync()

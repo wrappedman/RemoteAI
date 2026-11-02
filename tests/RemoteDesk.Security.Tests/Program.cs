@@ -8,8 +8,8 @@ using RemoteDesk.Security;
 using RemoteDesk.Transport;
 
 static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
-using var host = DeviceIdentity.CreateEphemeral();
-using var controller = DeviceIdentity.CreateEphemeral();
+using var host = DeviceIdentity.CreateForTesting();
+using var controller = DeviceIdentity.CreateForTesting();
 Check(host.DeviceId.Length == 64 && host.DeviceId != controller.DeviceId, "Distinct identities");
 Check(DeviceIdentity.ValidatePeer(host.Certificate, SslPolicyErrors.RemoteCertificateChainErrors, host.DeviceId), "Valid pin");
 Check(!DeviceIdentity.ValidatePeer(host.Certificate, SslPolicyErrors.None, controller.DeviceId), "Wrong pin");
@@ -29,6 +29,7 @@ int approvals = 0;
 var established = new TaskCompletionSource<SecureSession>(TaskCreationOptions.RunContinuationsAsynchronously);
 await using var agent = new LanAgent(host)
 {
+    Audit = Console.WriteLine,
     Approve = (request, _) => { Check(request.DeviceId == controller.DeviceId, "TLS identity bound to request"); Interlocked.Increment(ref approvals); return Task.FromResult(true); },
     Established = session => { established.TrySetResult(session); return Task.CompletedTask; }
 };
