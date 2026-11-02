@@ -283,6 +283,6 @@ public partial class MainWindow : Window
         _canClose = true;
         // With no active session all awaits above may complete synchronously. Never
         // recursively call Close from inside the original WPF Closing event.
-        Dispatcher.BeginInvoke(new Action(Close));
+        _ = Dispatcher.BeginInvoke(new Action(Close));
     }
 }
