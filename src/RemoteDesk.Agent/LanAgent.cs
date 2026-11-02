@@ -17,6 +17,7 @@ public sealed class LanAgent(DeviceIdentity identity) : IAsyncDisposable
     private readonly object _activeGate = new();
     private CancellationTokenSource? _activeStop;
     public int Port => (_listener?.LocalEndpoint as IPEndPoint)?.Port ?? 0;
+    public Func<ApprovalRequest, CancellationToken, Task<SessionGrant?>>? Authorize { get; set; }
     public Func<bool> TryReserve { get; set; } = () => true;
     public Func<ApprovalRequest, CancellationToken, Task<bool>> Approve { get; set; } = (_, _) => Task.FromResult(false);
     public Func<SecureSession, Task> Established { get; set; } = _ => Task.CompletedTask;
@@ -62,7 +63,7 @@ public sealed class LanAgent(DeviceIdentity identity) : IAsyncDisposable
         try
         {
             await using var session = await SecureSession.AcceptAsync(client, identity, Approve,
-                state => StateChanged?.Invoke(state), activeStop.Token).ConfigureAwait(false);
+                state => StateChanged?.Invoke(state), activeStop.Token, Authorize).ConfigureAwait(false);
             if (session is null) { Audit?.Invoke("Incoming request rejected or expired."); return; }
             Audit?.Invoke("Attended LAN session approved.");
             await Established(session).ConfigureAwait(false);

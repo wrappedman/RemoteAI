@@ -3,7 +3,7 @@ namespace RemoteDesk.Protocol;
 
 public static class JpegFrame
 {
-    public const int MaxWidth = 1600, MaxHeight = 1000;
+    public const int MaxWidth = 1920, MaxHeight = 1200;
     // Read bounded JPEG headers before invoking the native image decoder. No huge image allocations.
     public static (int Width, int Height) Validate(ReadOnlySpan<byte> bytes)
     {

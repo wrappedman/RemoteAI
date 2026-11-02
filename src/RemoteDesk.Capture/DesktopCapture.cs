@@ -14,7 +14,7 @@ public sealed class DesktopCapture : IDisposable
 {
     private IntPtr _screen, _memory, _bitmap, _oldBitmap;
     private int _width, _height;
-    public byte[] Capture()
+    public byte[] Capture(int maxWidth = 1440, int qualityLevel = 55)
     {
         int width = GetSystemMetrics(0), height = GetSystemMetrics(1);
         if (width is < 1 or > 16384 || height is < 1 or > 8192 || (long)width * height > 70_000_000)
@@ -22,10 +22,11 @@ public sealed class DesktopCapture : IDisposable
         if (_bitmap == IntPtr.Zero || width != _width || height != _height) Initialize(width, height);
         if (!BitBlt(_memory, 0, 0, width, height, _screen, 0, 0, 0x40CC0020)) throw new Win32Exception();
         var source = Imaging.CreateBitmapSourceFromHBitmap(_bitmap, IntPtr.Zero, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
-        double scale = Math.Min(1, Math.Min(1440d / width, 900d / height));
+        maxWidth = Math.Clamp(maxWidth, 640, 1920); qualityLevel = Math.Clamp(qualityLevel, 20, 85);
+        double scale = Math.Min(1, Math.Min((double)maxWidth / width, 1200d / height));
         BitmapSource scaled = scale < 1 ? new TransformedBitmap(source, new ScaleTransform(scale, scale)) : source;
         scaled.Freeze();
-        foreach (int quality in new[] { 60, 40, 20 })
+        foreach (int quality in new[] { qualityLevel, 35, 20 }.Distinct())
         {
             using var output = new MemoryStream();
             var encoder = new JpegBitmapEncoder { QualityLevel = quality };

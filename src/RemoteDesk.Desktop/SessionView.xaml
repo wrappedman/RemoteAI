@@ -1,0 +1,41 @@
+<UserControl x:Class="RemoteDesk.Desktop.SessionView" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Background="#0D1015" IsVisibleChanged="View_VisibleChanged">
+ <Grid>
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="28"/></Grid.RowDefinitions>
+  <Border Background="#1A202A" Padding="12,8" BorderBrush="#303A49" BorderThickness="0,0,0,1">
+   <WrapPanel VerticalAlignment="Center">
+    <CheckBox x:Name="ControlCheck" Content="Control input" Margin="0,0,16,0" Checked="Control_Changed" Unchecked="Control_Changed"/>
+    <TextBlock Text="FPS" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="#91A3BA"/>
+    <ComboBox x:Name="FpsBox" Width="65" SelectionChanged="Profile_Changed" Margin="0,0,10,0"><ComboBoxItem Content="5"/><ComboBoxItem Content="15"/><ComboBoxItem Content="20"/><ComboBoxItem Content="24"/><ComboBoxItem Content="30"/></ComboBox>
+    <ComboBox x:Name="QualityBox" Width="118" SelectedIndex="1" SelectionChanged="Profile_Changed" Margin="0,0,10,0"><ComboBoxItem Content="Fast · 960px"/><ComboBoxItem Content="Balanced · 1440px"/><ComboBoxItem Content="Sharp · 1920px"/></ComboBox>
+    <ComboBox x:Name="DisplayBox" Width="100" SelectedIndex="0" SelectionChanged="Display_Changed" Margin="0,0,10,0"><ComboBoxItem Content="Fit"/><ComboBoxItem Content="Actual size"/><ComboBoxItem Content="Stretch"/></ComboBox>
+    <CheckBox x:Name="AnimationsCheck" Content="No animations" Margin="0,0,12,0" Checked="Animations_Changed" Unchecked="Animations_Changed"/>
+    <Button Content="Full screen · F11" Padding="10,6" Click="FullScreen_Click" Margin="0,0,6,0"/>
+    <Button x:Name="FilesButton" Content="Files" Padding="10,6" Click="Files_Click" Margin="0,0,6,0"/>
+    <Button x:Name="AdminButton" Content="Request admin" Padding="10,6" Click="Admin_Click" Margin="0,0,6,0"/>
+    <Button x:Name="LockButton" Content="Block local input…" Padding="10,6" Click="Lock_Click" Margin="0,0,6,0"/>
+    <Button x:Name="ViewerDisconnectButton" Content="Disconnect" Padding="10,6" Background="#512936" Click="Disconnect_Click"/>
+   </WrapPanel>
+  </Border>
+  <Grid Grid.Row="1">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition x:Name="FilesColumn" Width="0"/></Grid.ColumnDefinitions>
+   <ScrollViewer x:Name="ImageScroller" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Disabled" Background="#05070B">
+    <Grid x:Name="InputSurface" Focusable="True" Background="Transparent" PreviewMouseMove="Surface_Move" PreviewMouseDown="Surface_Down" PreviewMouseUp="Surface_Up" PreviewMouseWheel="Surface_Wheel" PreviewKeyDown="Surface_KeyDown" PreviewKeyUp="Surface_KeyUp" LostKeyboardFocus="Surface_LostFocus" KeyboardNavigation.TabNavigation="None">
+     <Image x:Name="RemoteImage" Stretch="Uniform" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+     <StackPanel x:Name="WaitingPanel" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="500" Margin="24">
+      <TextBlock x:Name="WaitingTitle" Text="Waiting for the first screen frame…" FontSize="23" FontWeight="SemiBold" TextAlignment="Center"/>
+      <TextBlock x:Name="WaitingDetail" Text="The encrypted channel is ready. A live picture appears only after the Host captures and sends it." Foreground="#8CA0BA" FontSize="13" TextWrapping="Wrap" TextAlignment="Center" Margin="0,12,0,0"/>
+     </StackPanel>
+    </Grid>
+   </ScrollViewer>
+   <Border Grid.Column="1" Background="#151A22" BorderBrush="#303A49" BorderThickness="1,0,0,0" Padding="12">
+    <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <DockPanel><TextBlock Text="Shared folder" FontSize="16" FontWeight="SemiBold"/><Button Content="×" HorizontalAlignment="Right" Padding="8,2" Click="Files_Click"/></DockPanel>
+     <StackPanel Grid.Row="1" Margin="0,12,0,10"><TextBlock x:Name="FolderPath" Text="/" TextWrapping="Wrap" Foreground="#91A3BA"/><WrapPanel Margin="0,8,0,0"><Button Content="Up" Padding="8,5" Click="Up_Click" Margin="0,0,6,0"/><Button Content="Refresh" Padding="8,5" Click="Refresh_Click"/><Button Content="Upload…" Padding="8,5" Click="Upload_Click" Margin="6,0,0,0"/></WrapPanel></StackPanel>
+     <ListBox Grid.Row="2" x:Name="FileList" MouseDoubleClick="File_DoubleClick" Background="#10151C" Foreground="#DCE6F5" BorderBrush="#2F3A49"><ListBox.ItemTemplate><DataTemplate><StackPanel Margin="4,5"><TextBlock Text="{Binding Name}"/><TextBlock Text="{Binding Size, StringFormat={}{0:N0} bytes}" Foreground="#8294AD" FontSize="10"/></StackPanel></DataTemplate></ListBox.ItemTemplate></ListBox>
+     <StackPanel Grid.Row="3" Margin="0,10,0,0"><Button Content="Download selected…" Click="Download_Click"/><Button Content="Pause transfer" Click="CancelTransfer_Click" Margin="0,6,0,0"/><TextBlock x:Name="TransferText" Text="Reconnect and select the same file/destination to resume. Existing files are never overwritten." TextWrapping="Wrap" FontSize="11" Foreground="#91A3BA" Margin="0,10,0,0"/></StackPanel>
+    </Grid>
+   </Border>
+  </Grid>
+  <Border Grid.Row="2" Background="#171C24" Padding="12,4"><TextBlock x:Name="ViewerStatus" Text="Secure channel ready" FontSize="11" Foreground="#93AAC6" TextTrimming="CharacterEllipsis"/></Border>
+ </Grid>
+</UserControl>

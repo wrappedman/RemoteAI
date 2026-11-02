@@ -24,6 +24,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RemoteDesk.Discovery", "src
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RemoteDesk.Capture", "src\RemoteDesk.Capture\RemoteDesk.Capture.csproj", "{E1450083-DA95-56C3-BF77-6F99B3F5F958}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RemoteDesk.Files", "src\RemoteDesk.Files\RemoteDesk.Files.csproj", "{E858A41A-FF6A-572E-9531-4BA4DCDAE718}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RemoteDesk.Windows", "src\RemoteDesk.Windows\RemoteDesk.Windows.csproj", "{26EA8E02-03AB-5D1F-A578-533DA05CC80C}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -78,5 +82,13 @@ Global
 		{E1450083-DA95-56C3-BF77-6F99B3F5F958}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E1450083-DA95-56C3-BF77-6F99B3F5F958}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{E1450083-DA95-56C3-BF77-6F99B3F5F958}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E858A41A-FF6A-572E-9531-4BA4DCDAE718}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E858A41A-FF6A-572E-9531-4BA4DCDAE718}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E858A41A-FF6A-572E-9531-4BA4DCDAE718}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E858A41A-FF6A-572E-9531-4BA4DCDAE718}.Release|Any CPU.Build.0 = Release|Any CPU
+		{26EA8E02-03AB-5D1F-A578-533DA05CC80C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{26EA8E02-03AB-5D1F-A578-533DA05CC80C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{26EA8E02-03AB-5D1F-A578-533DA05CC80C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{26EA8E02-03AB-5D1F-A578-533DA05CC80C}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

@@ -4,8 +4,8 @@ using System.Text.Json.Serialization;
 
 namespace RemoteDesk.Protocol;
 
-public enum MessageType { ConnectionRequest, Approval, Rejection, Ping, Pong, Disconnect, ScreenFrame, ScreenUnavailable }
-public sealed record Payload(string? DeviceId = null, string? DisplayName = null, bool ViewScreen = false, byte[]? Jpeg = null);
+public enum MessageType { ConnectionRequest, Approval, Rejection, Ping, Pong, Disconnect, ScreenFrame, ScreenUnavailable, Input, Command, Reply }
+public sealed record Payload(string? DeviceId = null, string? DisplayName = null, bool ViewScreen = false, byte[]? Jpeg = null, bool ControlInput = false, bool FileAccess = false, bool DesktopEffects = false, string? Password = null, InputEvent? Input = null, RemoteCommand? Command = null);
 public sealed record Envelope(
     [property: JsonRequired] int Version,
     [property: JsonRequired] Guid MessageId,
@@ -16,10 +16,10 @@ public sealed record Envelope(
 
 public static class WireProtocol
 {
-    public const int Version = 2;
-    public const int MaxFrameBytes = 384 * 1024;
-    public const int MaxJpegBytes = 256 * 1024;
-    public const int MaxMessagesPerSession = 100000;
+    public const int Version = 3;
+    public const int MaxFrameBytes = 768 * 1024;
+    public const int MaxJpegBytes = 512 * 1024;
+    public const int MaxMessagesPerSession = 1000000;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -43,24 +43,56 @@ public static class WireProtocol
         {
             if (payload.DeviceId is not { Length: 64 } id || !id.All(Uri.IsHexDigit) ||
                 string.IsNullOrWhiteSpace(payload.DisplayName) || payload.DisplayName.Length > 64 ||
-                payload.DisplayName.Any(char.IsControl) || payload.Jpeg is not null)
+                payload.DisplayName.Any(char.IsControl) || payload.Jpeg is not null || payload.Input is not null || payload.Command is not null || payload.Password?.Length > 256)
                 throw new InvalidDataException("Invalid connection request.");
         }
-        else if (message.Type == MessageType.ScreenFrame)
+        else
         {
-            if (payload.DeviceId is not null || payload.DisplayName is not null || payload.ViewScreen || payload.Jpeg is null)
-                throw new InvalidDataException("Invalid screen payload.");
-            JpegFrame.Validate(payload.Jpeg);
+            if (payload.DeviceId is not null || payload.DisplayName is not null || payload.Password is not null ||
+                (message.Type != MessageType.Approval && (payload.ViewScreen || payload.ControlInput || payload.FileAccess || payload.DesktopEffects)))
+                throw new InvalidDataException("Unexpected capability or identity fields.");
+            if (message.Type == MessageType.ScreenFrame)
+            {
+                if (payload.Jpeg is null) throw new InvalidDataException("Missing screen.");
+                JpegFrame.Validate(payload.Jpeg);
+            }
+            else if (payload.Jpeg is not null) throw new InvalidDataException("Unexpected screen.");
+            if (message.Type == MessageType.Input)
+            {
+                var i = payload.Input ?? throw new InvalidDataException("Missing input.");
+                if (!Enum.IsDefined(i.Kind) || i.X is < 0 or > 65535 || i.Y is < 0 or > 65535 ||
+                    i.Code is < 0 or > 254 || i.Delta is < -1200 or > 1200 ||
+                    (i.Kind == InputKind.Key && i.Code == 0) || (i.Kind == InputKind.Button && i.Code is < 1 or > 5))
+                    throw new InvalidDataException("Invalid input.");
+            }
+            else if (payload.Input is not null) throw new InvalidDataException("Unexpected input.");
+            if (message.Type is MessageType.Command or MessageType.Reply)
+            {
+                var c = payload.Command ?? throw new InvalidDataException("Missing command.");
+                if (c.Id == Guid.Empty || !Enum.IsDefined(c.Operation) || c.Path?.Length > 1024 || c.Data?.Length > 32768 ||
+                    c.Offset is < 0 or > 8L * 1024 * 1024 * 1024 || c.Length is < 0 or > 8L * 1024 * 1024 * 1024 ||
+                    c.Hash is not null && (c.Hash.Length != 64 || !c.Hash.All(Uri.IsHexDigit)) || c.Error?.Length > 256 || c.Entries?.Length > 256 ||
+                    c.Entries?.Any(e => string.IsNullOrEmpty(e.Name) || e.Name.Length > 255 || e.Size < 0) == true ||
+                    (c.Operation == Operation.SetStream && (c.Fps is < 1 or > 30 || c.Width is < 640 or > 1920 || c.Quality is < 20 or > 85)))
+                    throw new InvalidDataException("Invalid command.");
+            }
+            else if (payload.Command is not null) throw new InvalidDataException("Unexpected command.");
         }
-        else if (payload.DeviceId is not null || payload.DisplayName is not null || payload.Jpeg is not null ||
-                 (payload.ViewScreen && message.Type != MessageType.Approval))
-            throw new InvalidDataException("Unexpected message payload.");
     }
 
     public static async Task WriteAsync(Stream stream, Envelope message, CancellationToken token)
     {
         Validate(message);
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(message, JsonOptions);
+        byte[] bytes;
+        if (message.Type == MessageType.ScreenFrame)
+        {
+            bytes = new byte[44 + message.Payload.Jpeg!.Length];
+            "RDV3"u8.CopyTo(bytes); message.SessionId.TryWriteBytes(bytes.AsSpan(4, 16));
+            BinaryPrimitives.WriteInt64BigEndian(bytes.AsSpan(20, 8), message.Sequence);
+            message.MessageId.TryWriteBytes(bytes.AsSpan(28, 16));
+            message.Payload.Jpeg.CopyTo(bytes, 44);
+        }
+        else bytes = JsonSerializer.SerializeToUtf8Bytes(message, JsonOptions);
         if (bytes.Length > MaxFrameBytes) throw new InvalidDataException("Frame exceeds size limit.");
         var header = new byte[4];
         BinaryPrimitives.WriteInt32BigEndian(header, bytes.Length);
@@ -77,6 +109,13 @@ public static class WireProtocol
         if (size < 2 || size > MaxFrameBytes) throw new InvalidDataException("Invalid frame length.");
         var bytes = new byte[size];
         await stream.ReadExactlyAsync(bytes, token).ConfigureAwait(false);
+        if (bytes.AsSpan().StartsWith("RDV3"u8))
+        {
+            if (bytes.Length < 60) throw new InvalidDataException("Truncated media frame.");
+            var media = new Envelope(Version, new Guid(bytes.AsSpan(28, 16)), new Guid(bytes.AsSpan(4, 16)),
+                BinaryPrimitives.ReadInt64BigEndian(bytes.AsSpan(20, 8)), MessageType.ScreenFrame, new(Jpeg: bytes[44..]));
+            Validate(media); return media;
+        }
         try
         {
             var result = JsonSerializer.Deserialize<Envelope>(bytes, JsonOptions)

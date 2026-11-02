@@ -30,5 +30,7 @@ public sealed class SessionStateMachine
 
 // Phase one deliberately does not grant screen capture or remote input capabilities.
 public sealed record SessionPermissions(bool ViewScreen = false, bool MouseControl = false, bool KeyboardControl = false);
-public sealed record ApprovalRequest(string DeviceId, string DisplayName, string Address, string VerificationCode = "", bool ViewScreen = false);
+public sealed record ApprovalRequest(string DeviceId, string DisplayName, string Address, string VerificationCode = "", bool ViewScreen = false, bool ControlInput = false, bool FileAccess = false, bool DesktopEffects = false, string? Password = null);
 public sealed record AuditEntry(DateTimeOffset Timestamp, string Event, string Detail);
+
+public sealed record SessionGrant(bool ViewScreen = false, bool ControlInput = false, bool FileAccess = false, bool DesktopEffects = false);

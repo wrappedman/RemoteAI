@@ -4,6 +4,10 @@ using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using RemoteDesk.Agent;
+using RemoteDesk.Core;
+using RemoteDesk.Files;
+using RemoteDesk.Protocol;
+using System.Security.Cryptography;
 using RemoteDesk.Discovery;
 using RemoteDesk.Security;
 using RemoteDesk.Transport;
@@ -134,3 +138,63 @@ await using (var discovery = new LanDiscovery(host, 45831, "Test Host", 0, IPAdd
     Check(found.Fingerprint == host.DeviceId && found.Port == 45831, "Numeric ID resolves without manual IP");
 }
 Console.WriteLine("PASS: screen permissions, encrypted JPEG transport, matching pairing code, numeric ID, discovery signatures/nonces and real UDP resolution");
+
+// Real TLS file access, cross-session resumable upload/download, directional input grant and sandboxing.
+string temporary = Path.Combine(Path.GetTempPath(), "RemoteDesk-test-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(temporary);
+try
+{
+    string share = Path.Combine(temporary, "share"), cache = Path.Combine(temporary, "cache"), local = Path.Combine(temporary, "local");
+    Directory.CreateDirectory(share); Directory.CreateDirectory(local);
+    var receivedInput = new TaskCompletionSource<InputEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
+    await using var filesHost = new LanAgent(host)
+    {
+        Authorize = (r, _) => Task.FromResult<SessionGrant?>(new(r.ViewScreen, r.ControlInput, r.FileAccess, false)),
+        Established = session =>
+        {
+            var service = new SharedFolderService(share, cache, session.PeerId);
+            session.CommandHandler = service.HandleAsync;
+            session.InputReceived += input => receivedInput.TrySetResult(input);
+            return Task.CompletedTask;
+        }
+    };
+    filesHost.Start(0, IPAddress.Loopback);
+    byte[] content = RandomNumberGenerator.GetBytes(160000); string hash = Convert.ToHexString(SHA256.HashData(content));
+    string source = Path.Combine(local, "payload.bin"); await File.WriteAllBytesAsync(source, content);
+    var grant = new SessionGrant(true, true, true);
+    await using (var first = await SecureSession.ConnectAsync("127.0.0.1", filesHost.Port, host.DeviceId, "Files", controller, _ => { }, deadline.Token, requested: grant))
+    {
+        first.Start();
+        await first.SendInputAsync(new(InputKind.Key, Code: 65), deadline.Token);
+        Check((await receivedInput.Task.WaitAsync(TimeSpan.FromSeconds(5))).Code == 65, "Approved input delivered without OS injection in the test");
+        var offer = RemoteCommand.Create(Operation.WriteBegin, "payload.bin") with { Hash = hash, Length = content.Length };
+        Check((await first.RequestAsync(offer, deadline.Token)).Offset == 0, "Initial upload offset");
+        await first.RequestAsync(RemoteCommand.Create(Operation.WriteChunk) with { Hash = hash, Offset = 0, Data = content[..32768] }, deadline.Token);
+        await first.DisconnectAsync();
+    }
+    await Task.Delay(150);
+    await using (var resumed = await SecureSession.ConnectAsync("127.0.0.1", filesHost.Port, host.DeviceId, "Resume", controller, _ => { }, deadline.Token, requested: grant))
+    {
+        resumed.Start();
+        var offset = await resumed.RequestAsync(RemoteCommand.Create(Operation.WriteBegin, "payload.bin") with { Hash = hash, Length = content.Length }, deadline.Token);
+        Check(offset.Offset == 32768, "Cross-session resume preserved acknowledged bytes");
+        await FileTransferClient.UploadAsync(resumed, source, null, deadline.Token);
+        Check((await File.ReadAllBytesAsync(Path.Combine(share, "payload.bin"))).SequenceEqual(content), "Resumed upload SHA and bytes");
+        await FileTransferClient.UploadAsync(resumed, source, null, deadline.Token); // Already committed file is idempotent.
+        string empty = Path.Combine(local, "empty.bin"); await File.WriteAllBytesAsync(empty, []);
+        await FileTransferClient.UploadAsync(resumed, empty, null, deadline.Token);
+        Check(File.Exists(Path.Combine(share, "empty.bin")), "Empty upload is committed");
+        string destination = Path.Combine(local, "download.bin");
+        await File.WriteAllBytesAsync(destination + ".remotedesk.part", content[..65536]);
+        await File.WriteAllTextAsync(destination + ".remotedesk.part.json", $"{host.DeviceId}|payload.bin|{content.Length}|{hash}");
+        await FileTransferClient.DownloadAsync(resumed, "payload.bin", destination, null, deadline.Token);
+        Check((await File.ReadAllBytesAsync(destination)).SequenceEqual(content), "Resumed download verified");
+        try { await resumed.RequestAsync(RemoteCommand.Create(Operation.ReadInfo, "../outside"), deadline.Token); throw new Exception("Traversal allowed"); }
+        catch (IOException) { }
+        var listing = await resumed.RequestAsync(RemoteCommand.Create(Operation.ListFiles, ""), deadline.Token);
+        Check(listing.Entries?.Any(e => e.Name == "payload.bin") == true, "Virtual shared-folder listing");
+        await resumed.DisconnectAsync();
+    }
+}
+finally { Directory.Delete(temporary, true); }
+Console.WriteLine("PASS: input grant, real TLS command/replies, shared-folder sandbox, cross-session upload resume, download resume, SHA-256, empty/idempotent upload and traversal rejection");

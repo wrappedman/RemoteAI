@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Net.Sockets;
 using System.Security.Authentication;
@@ -7,382 +8,322 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media.Imaging;
-using System.Windows.Threading;
+using System.Windows.Input;
+using System.Windows.Media;
 using RemoteDesk.Agent;
-using RemoteDesk.Capture;
 using RemoteDesk.Core;
 using RemoteDesk.Discovery;
+using RemoteDesk.Protocol;
 using RemoteDesk.Security;
 using RemoteDesk.Transport;
-
+using RemoteDesk.Windows;
 namespace RemoteDesk.Desktop;
 
 public sealed record SavedDevice(string Name, string Code, string? Fingerprint = null);
-
 public partial class MainWindow : Window
 {
+    private sealed record WorkspaceSession(SecureSession Session, SessionView View, TabItem Tab, HostSessionRuntime? Host, bool Owned);
+    private readonly Dictionary<SecureSession, WorkspaceSession> _sessions = [];
+    public IReadOnlyList<SessionView> ActiveViews => _sessions.Values.Select(s => s.View).ToList();
     private DeviceIdentity? _identity;
     private LanAgent? _agent;
     private LanDiscovery? _discovery;
-    private volatile SecureSession? _session;
-    private CancellationTokenSource? _operation;
-    private TaskCompletionSource<bool>? _approval;
-    private readonly SessionStateMachine _machine = new();
+    private AppSettings _settings = new();
     private readonly ObservableCollection<AuditEntry> _audit = [];
-    private readonly DispatcherTimer _renderTimer = new() { Interval = TimeSpan.FromMilliseconds(125) };
     private List<SavedDevice> _devices = [];
-    private byte[]? _latestFrame;
-    private DateTimeOffset _lastFrame;
-    private long _receivedFrames;
-    private bool _busy, _incoming, _closing, _canClose, _changingListener;
-    private readonly string _settingsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RemoteDesk", "devices-v2.json");
-
+    private CancellationTokenSource? _connection;
+    private TaskCompletionSource<SessionGrant?>? _approval;
+    private ApprovalRequest? _approvalRequest;
+    private bool _connecting, _closing, _canClose, _listenerChanging, _fullScreen;
+    private int _passwordFailures;
+    private long _passwordBlockedUntil;
+    private WindowState _oldWindowState;
+    private readonly string _devicesPath = Path.Combine(AppSettings.DataDirectory, "devices-v2.json");
     public MainWindow()
     {
-        InitializeComponent();
-        AuditList.ItemsSource = _audit;
-        _renderTimer.Tick += RenderFrame;
+        InitializeComponent(); AuditList.ItemsSource = _audit;
+        SettingsPage.SaveRequested = SaveSettingsAsync;
     }
-    private void Ui(Action action)
-    {
-        if (Dispatcher.CheckAccess()) action(); else Dispatcher.Invoke(action);
-    }
-    private void Log(string message) => Ui(() =>
-    {
-        _audit.Insert(0, new(DateTimeOffset.Now, "Endpoint", message));
-        while (_audit.Count > 100) _audit.RemoveAt(_audit.Count - 1);
-    });
-    private void SetState(SessionState state) => Ui(() =>
-    {
-        if (state == SessionState.Disconnected) ResetState();
-        else
-        {
-            if (_machine.State == state) return;
-            _machine.MoveTo(state);
-            StateText.Text = state == SessionState.Connected ? "Secure channel ready" : state.ToString();
-            TopStatus.Text = "●  " + StateText.Text;
-            ConnectButton.IsEnabled = false;
-            DisconnectButton.Visibility = Visibility.Visible;
-            Log($"Session state: {state}");
-        }
-    });
-    private void ResetState()
-    {
-        if (_machine.State != SessionState.Disconnected)
-        {
-            if (_machine.State != SessionState.Disconnecting) _machine.MoveTo(SessionState.Disconnecting);
-            _machine.MoveTo(SessionState.Disconnected);
-        }
-        _busy = false; _incoming = false;
-        _renderTimer.Stop(); Interlocked.Exchange(ref _latestFrame, null);
-        RemoteImage.Source = null;
-        ViewerPanel.Visibility = SharingPanel.Visibility = ApprovalPanel.Visibility = PairingPanel.Visibility = Visibility.Collapsed;
-        ConnectionCards.Visibility = Visibility.Visible;
-        StateText.Text = "Disconnected"; PeerText.Text = "No active peer";
-        CipherText.Text = "Mutual TLS · verified device key";
-        TopStatus.Text = _agent is null ? "●  Availability off" : "●  Available on this LAN";
-        ConnectButton.IsEnabled = _identity is not null && !_closing;
-        DisconnectButton.Visibility = Visibility.Collapsed;
-    }
+    private void Ui(Action action) { if (Dispatcher.CheckAccess()) action(); else Dispatcher.Invoke(action); }
+    private void Post(Action action) => _ = Dispatcher.BeginInvoke(action);
+    private void Log(string detail) => Ui(() => { _audit.Insert(0, new(DateTimeOffset.Now, "Endpoint", detail)); while (_audit.Count > 100) _audit.RemoveAt(_audit.Count - 1); });
+    private static string DisplayName() => new(Environment.MachineName.Where(c => !char.IsControl(c)).Take(64).ToArray());
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
         ConnectButton.IsEnabled = false;
         try
         {
+            _settings = AppSettings.Load();
             _identity = await Task.Run(DeviceIdentity.LoadOrCreateWindows);
             if (_closing) { _identity.Dispose(); return; }
             IdentityBox.Text = NumericDeviceId.Format(NumericDeviceId.FromFingerprint(_identity.DeviceId));
-            FullFingerprintBox.Text = _identity.DeviceId;
-            MachineNameText.Text = Environment.MachineName;
-            LocalAddressText.Text = "Share your ID. No IP address needed on this LAN.";
-            FooterText.Text = "RemoteDesk  /  LAN screen viewing · v0.2";
+            FullFingerprintBox.Text = _identity.DeviceId; MachineNameText.Text = Environment.MachineName;
             try
             {
-                if (File.Exists(_settingsPath) && new FileInfo(_settingsPath).Length <= 131072)
-                    _devices = (JsonSerializer.Deserialize<List<SavedDevice>>(await File.ReadAllTextAsync(_settingsPath)) ?? [])
+                if (File.Exists(_devicesPath) && new FileInfo(_devicesPath).Length <= 131072)
+                    _devices = (JsonSerializer.Deserialize<List<SavedDevice>>(await File.ReadAllTextAsync(_devicesPath)) ?? [])
                         .Where(d => d.Name is { Length: > 0 and <= 64 } && d.Code is { Length: 12 } && d.Code.All(char.IsAsciiDigit)).Take(100).ToList();
             }
-            catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { Log("Saved devices could not be loaded."); }
-            FilterDevices(); ConnectButton.IsEnabled = true;
-            Log("Persistent numeric ID ready. Every screen-sharing session needs Host approval.");
-            ListenCheck.IsChecked = true; // Available while the visible app is running; never unattended.
+            catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { Log("Saved targets could not be loaded."); }
+            FilterDevices(); SettingsPage.Load(_settings); ConnectButton.IsEnabled = true;
+            ListenCheck.IsChecked = _settings.AvailableOnStart;
+            if (!_settings.AvailableOnStart) ListenerBadge.Text = "Availability off";
+            Log("Workspace ready. Each device gets an independent session tab.");
         }
-        catch (Exception ex) when (ex is CryptographicException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or CryptographicException or UnauthorizedAccessException)
+        { ErrorText.Text = "Cannot initialize the Windows device identity or user settings."; }
+    }
+    private async Task StartAvailabilityAsync()
+    {
+        if (_identity is null || _agent is not null) return;
+        var agent = new LanAgent(_identity)
         {
-            ErrorText.Text = "Device identity could not be initialized. Check your Windows user profile and key-store access.";
-            Log("Identity initialization failed; no connection allowed.");
-        }
+            TryReserve = () => !_closing,
+            Authorize = AuthorizeAsync,
+            Established = session => Dispatcher.InvokeAsync(() => AttachSession(session, false)).Task,
+            Audit = Log
+        };
+        try { agent.Start(_settings.Port); _agent = agent; }
+        catch { await agent.DisposeAsync(); throw; }
+        try { _discovery = new LanDiscovery(_identity, agent.Port, DisplayName()); _discovery.Start(); ListenerBadge.Text = "● Available on this LAN"; }
+        catch (SocketException) { ListenerBadge.Text = "Manual address only"; ErrorText.Text = "UDP discovery 45832 is busy. Close duplicate instances or use manual setup."; }
+        Log($"Incoming TLS listener started on configured port {agent.Port}.");
+    }
+    private async Task StopAvailabilityAsync()
+    {
+        if (_discovery is not null) { var d = _discovery; _discovery = null; await d.DisposeAsync(); }
+        if (_agent is not null) { var a = _agent; _agent = null; await a.DisposeAsync(); }
+        ListenerBadge.Text = "OFFLINE";
     }
     private async void Listen_Changed(object sender, RoutedEventArgs e)
     {
-        if (_changingListener || _closing || _identity is null) return;
-        ListenCheck.IsEnabled = false;
-        try
-        {
-            if (ListenCheck.IsChecked == true)
-            {
-                var agent = new LanAgent(_identity)
-                {
-                    TryReserve = () => Dispatcher.Invoke(() =>
-                    {
-                        if (_busy || _closing) return false;
-                        _busy = true; _incoming = true; return true;
-                    }),
-                    Approve = (request, token) => Dispatcher.InvokeAsync(() => AskApprovalAsync(request, token)).Task.Unwrap(),
-                    StateChanged = state => Ui(() => { if (_incoming) SetState(state); }),
-                    Established = session => Dispatcher.InvokeAsync(() => AttachSession(session, false)).Task,
-                    Audit = Log
-                };
-                try { agent.Start(); _agent = agent; }
-                catch { await agent.DisposeAsync(); throw; }
-                try
-                {
-                    _discovery = new LanDiscovery(_identity, agent.Port, DisplayName()); _discovery.Start();
-                    ListenerBadge.Text = "● AVAILABLE"; TopStatus.Text = "●  Available on this LAN";
-                    Log("Attended listener and signed numeric-ID discovery started.");
-                }
-                catch (SocketException)
-                {
-                    ListenerBadge.Text = "MANUAL ONLY";
-                    ErrorText.Text = "Numeric-ID discovery could not bind UDP 45832. Close other instances or use Advanced manual setup.";
-                }
-            }
-            else
-            {
-                if (_discovery is not null) { var discovery = _discovery; _discovery = null; await discovery.DisposeAsync(); }
-                if (_agent is not null) { var agent = _agent; _agent = null; await agent.DisposeAsync(); }
-                ListenerBadge.Text = "OFFLINE"; TopStatus.Text = "●  Availability off";
-                Log("Incoming availability and discovery stopped.");
-            }
-        }
-        catch (SocketException)
-        {
-            _changingListener = true; ListenCheck.IsChecked = false; _changingListener = false;
-            ErrorText.Text = "Cannot listen on TCP 45831. Close other RemoteDesk instances or check Windows Firewall.";
-        }
-        finally { ListenCheck.IsEnabled = true; }
+        if (_listenerChanging || _closing || _identity is null) return;
+        _listenerChanging = true; ListenCheck.IsEnabled = false;
+        try { if (ListenCheck.IsChecked == true) await StartAvailabilityAsync(); else await StopAvailabilityAsync(); }
+        catch (SocketException) { ListenCheck.IsChecked = false; ErrorText.Text = "Cannot bind the chosen TCP port. Close duplicate instances or choose another port in Settings."; }
+        finally { ListenCheck.IsEnabled = true; _listenerChanging = false; }
     }
-    private static string DisplayName() => new(Environment.MachineName.Where(c => !char.IsControl(c)).Take(64).ToArray());
-    private async Task<bool> AskApprovalAsync(ApprovalRequest request, CancellationToken token)
+    private async Task<SessionGrant?> AuthorizeAsync(ApprovalRequest request, CancellationToken token)
     {
-        _approval = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        ApprovalDetails.Text = $"Device: {NumericDeviceId.Format(NumericDeviceId.FromFingerprint(request.DeviceId))}\nName (unverified): {request.DisplayName}\nSession code: {request.VerificationCode}\nRequested: {(request.ViewScreen ? "VIEW YOUR PRIMARY DISPLAY" : "protocol only")}\nExpires in 45 seconds.";
-        ApproveButton.Content = request.ViewScreen ? "Approve & share my screen" : "Approve protocol only";
-        ApprovalPanel.Visibility = Visibility.Visible; Activate();
-        _ = Dispatcher.BeginInvoke(new Action(() => ApprovalPanel.BringIntoView()));
-        Log("Incoming request requires explicit local approval.");
-        try { return await _approval.Task.WaitAsync(token); }
-        finally { _approval = null; ApprovalPanel.Visibility = Visibility.Collapsed; }
+        // Password access is deliberately restricted to previously, explicitly trusted full keys.
+        if (_settings.PasswordAccess && !string.IsNullOrEmpty(request.Password))
+        {
+            if (Environment.TickCount64 < Interlocked.Read(ref _passwordBlockedUntil)) return null;
+            bool trusted = _settings.TrustedControllers.Contains(request.DeviceId, StringComparer.Ordinal);
+            bool valid = trusted && _settings.ProtectedPasswordVerifier is not null &&
+                await Task.Run(() => PasswordVerifier.Verify(_settings.ProtectedPasswordVerifier, request.Password), token);
+            if (!valid)
+            {
+                if (Interlocked.Increment(ref _passwordFailures) >= 3) { Interlocked.Exchange(ref _passwordBlockedUntil, Environment.TickCount64 + 60000); Interlocked.Exchange(ref _passwordFailures, 0); }
+                Log("Automatic approval refused (untrusted key, invalid password or cooldown)."); return null;
+            }
+            Interlocked.Exchange(ref _passwordFailures, 0);
+            Log("Password-authorized, explicitly trusted Controller connected while the Host app is visible.");
+            return new(request.ViewScreen, request.ControlInput && _settings.AllowControl && _settings.PasswordControl,
+                request.FileAccess && _settings.AllowFiles && _settings.PasswordFiles && !string.IsNullOrEmpty(_settings.SharedFolder), false);
+        }
+        return await Dispatcher.InvokeAsync(() => PromptAsync(request, token)).Task.Unwrap();
     }
-    private void Approve_Click(object sender, RoutedEventArgs e) => _approval?.TrySetResult(true);
-    private void Reject_Click(object sender, RoutedEventArgs e) => _approval?.TrySetResult(false);
+    private async Task<SessionGrant?> PromptAsync(ApprovalRequest request, CancellationToken token)
+    {
+        _approval = new(TaskCreationOptions.RunContinuationsAsynchronously); _approvalRequest = request;
+        ApprovalDetails.Text = $"Device {NumericDeviceId.Format(NumericDeviceId.FromFingerprint(request.DeviceId))}\nName (unverified): {request.DisplayName}\nSession reference: {request.VerificationCode}\nFull Controller key:\n{request.DeviceId}\nExpires in 45 seconds.";
+        GrantControlCheck.IsEnabled = request.ControlInput && _settings.AllowControl;
+        GrantFilesCheck.IsEnabled = request.FileAccess && _settings.AllowFiles && !string.IsNullOrEmpty(_settings.SharedFolder);
+        GrantEffectsCheck.IsEnabled = request.DesktopEffects && _settings.AllowEffects;
+        GrantControlCheck.IsChecked = GrantFilesCheck.IsChecked = GrantEffectsCheck.IsChecked = TrustControllerCheck.IsChecked = false;
+        ApprovalPanel.Visibility = Visibility.Visible; Workspace.SelectedItem = ConnectionCenterTab; Activate();
+        Post(() => ApprovalPanel.BringIntoView());
+        try { return await _approval.Task.WaitAsync(token); }
+        finally { _approval = null; _approvalRequest = null; ApprovalPanel.Visibility = Visibility.Collapsed; }
+    }
+    private async void Approve_Click(object sender, RoutedEventArgs e)
+    {
+        if (_approvalRequest is not { } request || _approval is null) return;
+        var grant = new SessionGrant(request.ViewScreen, GrantControlCheck.IsEnabled && GrantControlCheck.IsChecked == true,
+            GrantFilesCheck.IsEnabled && GrantFilesCheck.IsChecked == true, GrantEffectsCheck.IsEnabled && GrantEffectsCheck.IsChecked == true);
+        var promise = _approval;
+        if (TrustControllerCheck.IsChecked == true && !_settings.TrustedControllers.Contains(request.DeviceId))
+        {
+            if (_settings.TrustedControllers.Count >= 128) { ErrorText.Text = "Trusted Controller limit reached. Forget keys in Settings."; return; }
+            _settings.TrustedControllers.Add(request.DeviceId);
+            try { await _settings.SaveAsync(); SettingsPage.Load(_settings); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            { _settings.TrustedControllers.Remove(request.DeviceId); ErrorText.Text = "Could not persist trust. This session can still use manual consent."; }
+        }
+        promise.TrySetResult(grant);
+    }
+    private void Reject_Click(object sender, RoutedEventArgs e) => _approval?.TrySetResult(null);
     private async void Connect_Click(object sender, RoutedEventArgs e)
     {
-        if (_identity is null || _busy) return;
-        ErrorText.Text = ""; _busy = true; _incoming = false;
-        _operation?.Dispose(); _operation = new();
-        ConnectButton.IsEnabled = false; DisconnectButton.Visibility = Visibility.Visible;
+        if (_identity is null || _connecting || _closing) return;
+        if (_sessions.Values.Count(s => s.Owned) >= 8) { ErrorText.Text = "Maximum 8 outgoing session tabs. Disconnect a tab first."; return; }
+        _connecting = true; ConnectButton.IsEnabled = false; CancelConnectButton.Visibility = Visibility.Visible; ErrorText.Text = "";
+        _connection?.Dispose(); _connection = new();
         try
         {
-            string address, pin; int port;
+            string address, pin; int port; string password = ConnectionPassword.Password;
             if (ManualCheck.IsChecked == true)
             {
-                address = AddressBox.Text.Trim();
-                if (Uri.CheckHostName(address) == UriHostNameType.Unknown) throw new ArgumentException("Enter a valid LAN IP address or hostname.");
+                address = AddressBox.Text.Trim(); if (Uri.CheckHostName(address) == UriHostNameType.Unknown) throw new ArgumentException("Enter a valid LAN address.");
                 if (!int.TryParse(PortBox.Text, out port) || port is < 1 or > 65535) throw new ArgumentException("Invalid Host port.");
                 pin = DeviceIdentity.NormalizeId(FingerprintBox.Text);
             }
             else
             {
                 string code = NumericDeviceId.Normalize(TargetIdBox.Text);
-                if (code == NumericDeviceId.FromFingerprint(_identity.DeviceId)) throw new ArgumentException("Enter another device's ID, not your own.");
-                StateText.Text = "Finding device on LAN…";
-                var target = await LanDiscovery.ResolveAsync(code, _operation.Token);
+                if (code == NumericDeviceId.FromFingerprint(_identity.DeviceId)) throw new ArgumentException("Choose another device's ID.");
+                ConnectionStatus.Text = "Finding device on LAN…";
                 var known = _devices.FirstOrDefault(d => d.Code == code && d.Fingerprint is not null);
-                if (known is not null && known.Fingerprint != target.Fingerprint) throw new AuthenticationException("Saved identity changed.");
-                address = target.Address.ToString(); port = target.Port; pin = target.Fingerprint;
+                if (!string.IsNullOrEmpty(password) && known is null) throw new ArgumentException("Pair manually before sending a password. A previously pinned Host key is required for automatic access.");
+                var target = await LanDiscovery.ResolveAsync(code, _connection.Token);
+                if (known is not null && known.Fingerprint != target.Fingerprint) throw new AuthenticationException("Saved Host key changed.");
+                address = target.Address.ToString(); pin = target.Fingerprint; port = target.Port;
             }
-            if (pin == _identity.DeviceId) throw new ArgumentException("Choose a different device.");
-            var session = await SecureSession.ConnectAsync(address, port, pin, DisplayName(), _identity, SetState, _operation.Token,
-                requestScreen: true, verificationCode: code => Ui(() =>
-                {
-                    PairingText.Text = $"Session code: {code} — compare this with the Host before they approve.";
-                    PairingPanel.Visibility = Visibility.Visible;
-                }));
-            if (_closing || _operation.IsCancellationRequested) { await session.DisposeAsync(); ResetState(); return; }
+            if (pin == _identity.DeviceId) throw new ArgumentException("Choose another device, not this profile's identity.");
+            var requested = new SessionGrant(true, RequestControlCheck.IsChecked == true, RequestFilesCheck.IsChecked == true, RequestEffectsCheck.IsChecked == true);
+            var session = await SecureSession.ConnectAsync(address, port, pin, DisplayName(), _identity,
+                state => Ui(() => ConnectionStatus.Text = state.ToString()), _connection.Token, requested: requested, password: string.IsNullOrEmpty(password) ? null : password,
+                verificationCode: code => Ui(() => { PairingText.Text = $"Session reference {code}. Compare trusted full fingerprints on an untrusted network."; PairingPanel.Visibility = Visibility.Visible; }));
+            if (_closing || _connection.IsCancellationRequested) { await session.DisposeAsync(); return; }
             AttachSession(session, true); session.Start();
-            try { await SaveDeviceAsync(NumericDeviceId.FromFingerprint(pin), pin); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log("Connected, but the verified target could not be saved."); }
+            try { await SaveTargetAsync(NumericDeviceId.FromFingerprint(pin), pin); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log("Connected, but target pin could not be saved."); }
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidDataException or IOException or SocketException or AuthenticationException or UnauthorizedAccessException or OperationCanceledException)
+        catch (Exception ex) when (ex is ArgumentException or IOException or InvalidDataException or SocketException or AuthenticationException or UnauthorizedAccessException or OperationCanceledException)
         {
             ErrorText.Text = ex switch
             {
                 ArgumentException or InvalidDataException => ex.Message,
-                AuthenticationException => "Device authentication failed or a saved key changed. Verify the full fingerprint in Advanced setup; never bypass a changed key.",
-                UnauthorizedAccessException => "The Host declined screen sharing.",
+                AuthenticationException => "Host identity failed or a saved key changed. Never bypass a changed pin; verify its full fingerprint independently.",
+                UnauthorizedAccessException => "Host denied access (consent/password/trusted-key policy).",
                 OperationCanceledException => "Connection cancelled or approval timed out.",
-                IOException => ex.Message.StartsWith("Device not found", StringComparison.Ordinal) ? ex.Message : "Connection failed. Update both endpoints to v0.2 and check Private-network firewall rules.",
-                _ => "Cannot reach the Host. Check that RemoteDesk is open and allowed on its Private network."
+                IOException => ex.Message.StartsWith("Device not found", StringComparison.Ordinal) ? ex.Message : "Connection failed. Update both endpoints to v0.3 and check the configured TCP / UDP discovery firewall rules.",
+                _ => "Cannot reach the Host. Check availability, port and Private-network firewall."
             };
-            Log("Connection did not complete."); ResetState();
+            ConnectionStatus.Text = "Not connected";
+        }
+        finally
+        {
+            ConnectionPassword.Clear(); _connecting = false; ConnectButton.IsEnabled = !_closing;
+            CancelConnectButton.Visibility = Visibility.Collapsed; PairingPanel.Visibility = Visibility.Collapsed;
         }
     }
+    private void CancelConnect_Click(object sender, RoutedEventArgs e) => _connection?.Cancel();
     private void AttachSession(SecureSession session, bool owned)
     {
-        _session = session; CipherText.Text = session.Cipher;
-        PairingText.Text = $"Session code: {session.VerificationCode}";
-        PeerText.Text = $"Peer: {NumericDeviceId.Format(NumericDeviceId.FromFingerprint(session.PeerId))} · {session.PeerName}";
-        if (session.CanReceiveScreen)
-        {
-            ViewerPanel.Visibility = Visibility.Visible; ConnectionCards.Visibility = Visibility.Collapsed;
-            ViewerStatus.Text = "Secure channel established — waiting for the first screen frame…";
-            StateText.Text = "Waiting for screen"; _receivedFrames = 0; _lastFrame = DateTimeOffset.UtcNow;
-            session.ScreenReceived += jpeg => { if (ReferenceEquals(_session, session)) Interlocked.Exchange(ref _latestFrame, jpeg); };
-            session.ScreenUnavailable += () => Ui(() =>
-            {
-                if (!ReferenceEquals(_session, session)) return;
-                _receivedFrames = 0; Interlocked.Exchange(ref _latestFrame, null);
-                RemoteImage.Source = null; ViewerStatus.Text = "Host cannot capture this desktop. Ask them to unlock their normal Windows desktop and reconnect.";
-                StateText.Text = "Screen unavailable"; TopStatus.Text = "●  Screen unavailable";
-            });
-            _renderTimer.Start();
-            _ = Dispatcher.BeginInvoke(new Action(() => ViewerPanel.BringIntoView()));
-        }
-        if (session.CanSendScreen)
-        {
-            SharingPanel.Visibility = Visibility.Visible;
-            StateText.Text = "Starting screen share";
-            _ = Dispatcher.BeginInvoke(new Action(() => SharingPanel.BringIntoView()));
-            session.StartScreenProducer(token => ShareScreenAsync(session, token));
-        }
-        Log("Authenticated session approved; screen permission enforced independently of transport state.");
-        _ = ObserveSessionAsync(session, owned);
+        var view = new SessionView(session, _settings.DefaultFps);
+        var header = new StackPanel { Orientation = Orientation.Horizontal };
+        header.Children.Add(new TextBlock { Text = (owned ? "▣ " : "↙ ") + NumericDeviceId.Format(NumericDeviceId.FromFingerprint(session.PeerId)), VerticalAlignment = VerticalAlignment.Center });
+        var close = new Button { Content = "×", Padding = new Thickness(5, 0, 5, 0), Margin = new Thickness(10, 0, 0, 0), Background = Brushes.Transparent, ToolTip = "Disconnect this device" };
+        header.Children.Add(close);
+        var tab = new TabItem { Header = header, Content = view };
+        HostSessionRuntime? host = null;
+        if (!owned) host = new(session, _settings, operation => ConfirmSensitiveAsync(operation), status => view.SetStatus(status));
+        var context = new WorkspaceSession(session, view, tab, host, owned); _sessions.Add(session, context);
+        view.FullScreen = SetFullScreen;
+        view.CloseRequested = () => session.DisconnectAsync();
+        close.Click += async (_, _) => await session.DisconnectAsync();
+        Workspace.Items.Insert(1, tab); Workspace.SelectedItem = tab; Post(() => tab.BringIntoView());
+        UpdateSessionCount(); Log(owned ? "Controller session opened in an independent tab." : "Host session authorized; granted capabilities are visible in its tab.");
+        _ = ObserveAsync(context);
     }
-    private async Task ShareScreenAsync(SecureSession session, CancellationToken token)
+    private async Task ObserveAsync(WorkspaceSession context)
     {
+        await context.Session.Completion;
         try
         {
-            using var capture = new DesktopCapture(); bool first = true;
-            while (!token.IsCancellationRequested)
-            {
-                byte[] jpeg = capture.Capture();
-                await session.SendScreenAsync(jpeg, token).ConfigureAwait(false);
-                if (first)
-                {
-                    first = false;
-                    Ui(() => { if (ReferenceEquals(_session, session)) { StateText.Text = "Sharing primary display"; TopStatus.Text = "●  Your screen is being shared"; } });
-                }
-                await Task.Delay(250, token).ConfigureAwait(false);
-            }
+            await context.View.DisposeAsync(); context.Host?.Dispose();
+            if (context.Owned) await context.Session.DisposeAsync();
         }
-        catch (OperationCanceledException) { }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or Win32Exception or NotSupportedException or InvalidOperationException or ArgumentException)
-        {
-            Ui(() =>
-            {
-                if (!ReferenceEquals(_session, session)) return;
-                StateText.Text = "Screen unavailable";
-                ErrorText.Text = "Screen capture stopped. Unlock your normal Windows desktop and reconnect. Protected/UAC desktops are not supported.";
-                Log("Screen producer stopped; no further screen data is sent.");
-            });
-            if (!token.IsCancellationRequested && !session.Completion.IsCompleted)
-            {
-                try { await session.NotifyScreenUnavailableAsync(token).ConfigureAwait(false); }
-                catch (Exception sendError) when (sendError is IOException or InvalidDataException or ObjectDisposedException or OperationCanceledException) { }
-            }
-        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or OperationCanceledException) { Log("Session cleanup completed after cancellation."); }
+        _sessions.Remove(context.Session); Workspace.Items.Remove(context.Tab); UpdateSessionCount();
+        if (_sessions.Count == 0) SetFullScreen(false);
+        ConnectionStatus.Text = context.Session.CloseReason; Log(context.Session.CloseReason);
     }
-    private async void RenderFrame(object? sender, EventArgs e)
+    private void UpdateSessionCount() => SessionCountText.Text = $"{_sessions.Values.Count(s => s.Owned)} outgoing · {_sessions.Values.Count(s => !s.Owned)} incoming";
+    private async Task<bool> ConfirmSensitiveAsync(Operation operation)
     {
-        var session = _session;
-        if (session is null) return;
-        byte[]? jpeg = Interlocked.Exchange(ref _latestFrame, null);
-        if (jpeg is null)
+        return await Dispatcher.InvokeAsync(() =>
         {
-            if (_receivedFrames > 0 && DateTimeOffset.UtcNow - _lastFrame > TimeSpan.FromSeconds(5))
-            {
-                ViewerStatus.Text = "No recent screen frame — the last image may be stale.";
-                StateText.Text = "Screen paused"; TopStatus.Text = "●  Waiting for screen frames";
-            }
-            return;
-        }
-        try
-        {
-            using var input = new MemoryStream(jpeg, false);
-            var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad;
-            image.StreamSource = input; image.EndInit(); image.Freeze();
-            RemoteImage.Source = image; _lastFrame = DateTimeOffset.UtcNow; _receivedFrames++;
-            ViewerStatus.Text = $"Live primary display · {image.PixelWidth} × {image.PixelHeight} · view only · frames {_receivedFrames}";
-            StateText.Text = "Viewing remote desktop"; TopStatus.Text = "●  Live encrypted screen";
-        }
-        catch (Exception ex) when (ex is IOException or NotSupportedException or ArgumentException or InvalidOperationException or FormatException)
-        {
-            ErrorText.Text = "An invalid screen image was received. The session has been closed.";
-            await session.DisconnectAsync();
-        }
-    }
-    private async Task ObserveSessionAsync(SecureSession session, bool owned)
-    {
-        await session.Completion;
-        Ui(() =>
-        {
-            Log(session.CloseReason);
-            if (ReferenceEquals(_session, session)) { _session = null; ResetState(); }
+            if (_closing) return false;
+            if (operation == Operation.RequestInputLock)
+                return MessageBox.Show(this, "The Controller requests blocking your PHYSICAL MOUSE AND KEYBOARD for at most 30 seconds. Windows may require elevation. Ctrl+Alt+Del releases the block immediately; disconnect/process exit also releases it.\n\nAllow this one temporary block?", "RemoteDesk · local input consent", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
+            bool accepted = MessageBox.Show(this, "The Controller requests restarting RemoteDesk as administrator. All of this app's sessions will close. You must approve the NORMAL WINDOWS UAC prompt yourself. A different Windows account can have a different device ID.\n\nRestart with UAC now?", "RemoteDesk · admin restart", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
+            if (accepted) _ = RestartElevatedAsync(); return accepted;
         });
-        if (owned) await session.DisposeAsync();
     }
-    private async void Disconnect_Click(object sender, RoutedEventArgs e)
+    private async Task RestartElevatedAsync()
     {
-        _operation?.Cancel(); _approval?.TrySetResult(false);
-        if (_incoming && _session is null) _agent?.CancelCurrent();
-        if (_session is not null) { SetState(SessionState.Disconnecting); await _session.DisconnectAsync(); }
+        await Task.Delay(1500); // Allow the authenticated reply to leave before closing the Host channel.
+        try
+        {
+            await StopAvailabilityAsync();
+            if (Environment.ProcessPath is null) throw new IOException("Cannot find the executable.");
+            var started = Process.Start(new ProcessStartInfo(Environment.ProcessPath) { UseShellExecute = true, Verb = "runas", WorkingDirectory = AppContext.BaseDirectory });
+            if (started is not null) Close();
+        }
+        catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException)
+        { ErrorText.Text = "UAC restart cancelled or failed. No elevation was bypassed."; await StartAvailabilityAsync(); }
     }
+    private async Task SaveSettingsAsync(AppSettings settings)
+    {
+        bool available = ListenCheck.IsChecked == true;
+        _listenerChanging = true; ListenCheck.IsEnabled = false;
+        try
+        {
+            await settings.SaveAsync(); await StopAvailabilityAsync(); _settings = settings;
+            if (available) await StartAvailabilityAsync();
+        }
+        catch (SocketException) { ListenCheck.IsChecked = false; throw new IOException("Settings saved, but the new TCP port is busy. Choose another or close duplicate instances."); }
+        finally { ListenCheck.IsEnabled = true; _listenerChanging = false; }
+    }
+    public void SetFullScreen(bool full)
+    {
+        if (_fullScreen == full) return; _fullScreen = full;
+        if (full) { _oldWindowState = WindowState; WindowState = WindowState.Normal; WindowStyle = WindowStyle.None; WindowState = WindowState.Maximized; RailColumn.Width = new GridLength(0); }
+        else { WindowStyle = WindowStyle.SingleBorderWindow; WindowState = _oldWindowState; RailColumn.Width = new GridLength(218); }
+    }
+    private void Window_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.F11 && Workspace.SelectedItem is TabItem { Content: SessionView }) { e.Handled = true; SetFullScreen(!_fullScreen); }
+        if (e.Key == Key.Escape && _fullScreen) { e.Handled = true; SetFullScreen(false); }
+    }
+    private void Workspace_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (Workspace.SelectedItem is TabItem { Content: not SessionView }) SetFullScreen(false); }
+    private void Home_Click(object sender, RoutedEventArgs e) { Workspace.SelectedItem = ConnectionCenterTab; TargetIdBox.Focus(); }
+    private void Settings_Click(object sender, RoutedEventArgs e) { SettingsPage.Load(_settings); SettingsTab.Visibility = Visibility.Visible; Workspace.SelectedItem = SettingsTab; }
     private void Copy_Click(object sender, RoutedEventArgs e)
     {
-        try { if (_identity is not null) { Clipboard.SetText(NumericDeviceId.FromFingerprint(_identity.DeviceId)); Log("Numeric device ID copied."); } }
-        catch (System.Runtime.InteropServices.COMException) { ErrorText.Text = "Clipboard is busy. Select and copy your ID manually."; }
+        try { if (_identity is not null) Clipboard.SetText(NumericDeviceId.FromFingerprint(_identity.DeviceId)); }
+        catch (System.Runtime.InteropServices.COMException) { ErrorText.Text = "Clipboard is busy; copy the displayed number manually."; }
     }
     private void FilterDevices()
     {
         if (DeviceList is null) return;
-        string search = SearchBox.Text.Trim();
-        var filtered = _devices.Where(d => d.Name.Contains(search, StringComparison.OrdinalIgnoreCase) || d.Code.Contains(search.Replace(" ", ""), StringComparison.OrdinalIgnoreCase)).ToList();
-        DeviceList.ItemsSource = filtered; EmptyDevices.Visibility = filtered.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        string query = SearchBox.Text.Trim().Replace(" ", ""); DeviceList.ItemsSource = _devices.Where(d => d.Code.Contains(query, StringComparison.OrdinalIgnoreCase) || d.Name.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
     }
     private void Search_Changed(object sender, TextChangedEventArgs e) => FilterDevices();
-    private async Task SaveDeviceAsync(string code, string? pin)
+    private async Task SaveTargetAsync(string code, string? pin)
     {
-        var old = _devices.FirstOrDefault(d => d.Code == code);
-        _devices.RemoveAll(d => d.Code == code);
+        var old = _devices.FirstOrDefault(d => d.Code == code); _devices.RemoveAll(d => d.Code == code);
         _devices.Insert(0, new("Device " + NumericDeviceId.Format(code), code, pin ?? old?.Fingerprint));
-        if (_devices.Count > 100) _devices.RemoveAt(_devices.Count - 1);
-        Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
-        await File.WriteAllTextAsync(_settingsPath, JsonSerializer.Serialize(_devices)); FilterDevices();
+        if (_devices.Count > 100) _devices.RemoveAt(100); Directory.CreateDirectory(AppSettings.DataDirectory);
+        await File.WriteAllTextAsync(_devicesPath, JsonSerializer.Serialize(_devices)); FilterDevices();
     }
-    private async void Save_Click(object sender, RoutedEventArgs e)
+    private async void SaveTarget_Click(object sender, RoutedEventArgs e)
     {
-        try { await SaveDeviceAsync(NumericDeviceId.Normalize(TargetIdBox.Text), null); Log("Numeric target saved. Every connection still needs local approval."); }
-        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException) { ErrorText.Text = ex is ArgumentException ? ex.Message : "Could not save target."; }
+        try { await SaveTargetAsync(NumericDeviceId.Normalize(TargetIdBox.Text), null); }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException) { ErrorText.Text = "Enter a valid ID; saved targets must be writable in your user profile."; }
     }
-    private void Device_Selected(object sender, SelectionChangedEventArgs e)
-    {
-        if (DeviceList.SelectedItem is SavedDevice device) { TargetIdBox.Text = NumericDeviceId.Format(device.Code); ManualCheck.IsChecked = false; }
-    }
-    private void Home_Click(object sender, RoutedEventArgs e) => TargetIdBox.Focus();
-    private void Guide_Click(object sender, RoutedEventArgs e) => MessageBox.Show(this,
-        "Run v0.2 on both devices on the SAME PRIVATE LAN. Share the Host's 12-digit ID. Enter that ID and select View remote screen. Compare the six-digit session code on both devices, then the Host selects Approve & share my screen.\n\nAllow TCP 45831 and UDP 45832 on Private networks if Windows Firewall blocks the app. See run/README.md and scripts/Enable-LanFirewall.ps1. Do not open these ports to the internet.\n\nThis version streams the primary display (JPEG, up to about 4 FPS). It is VIEW ONLY: no mouse, keyboard, files, clipboard, unattended access or UAC/Secure Desktop. Internet ID routing and relay require a deployed server and are not configured.",
-        "RemoteDesk · ID connection & screen sharing", MessageBoxButton.OK, MessageBoxImage.Information);
+    private void Device_Selected(object sender, SelectionChangedEventArgs e) { if (DeviceList.SelectedItem is SavedDevice device) { TargetIdBox.Text = NumericDeviceId.Format(device.Code); ManualCheck.IsChecked = false; Workspace.SelectedItem = ConnectionCenterTab; } }
     private async void Window_Closing(object? sender, CancelEventArgs e)
     {
-        if (_canClose) return;
-        e.Cancel = true; if (_closing) return; _closing = true;
-        _renderTimer.Stop(); _operation?.Cancel(); _approval?.TrySetResult(false);
-        if (_session is not null) await _session.DisconnectAsync();
-        if (_discovery is not null) await _discovery.DisposeAsync();
-        if (_agent is not null) await _agent.DisposeAsync();
-        _identity?.Dispose(); _operation?.Dispose();
-        _canClose = true; _ = Dispatcher.BeginInvoke(new Action(Close));
+        if (_canClose) return; e.Cancel = true; if (_closing) return; _closing = true;
+        _connection?.Cancel(); _approval?.TrySetResult(null);
+        foreach (var context in _sessions.Values.ToArray()) await context.Session.DisconnectAsync();
+        await StopAvailabilityAsync();
+        // The observers quiesce decoder/input tasks before their tabs are removed.
+        while (_sessions.Count > 0) await Task.Delay(20);
+        _identity?.Dispose(); _connection?.Dispose(); _canClose = true; _ = Dispatcher.BeginInvoke(new Action(Close));
     }
 }
