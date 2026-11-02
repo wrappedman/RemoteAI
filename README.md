@@ -12,7 +12,7 @@ See [`run/README.md`](run/README.md). The Windows build produces:
 - `run/RemoteDesk-win-x64-portable.zip`: extract first; includes the runtime and runs without a separate .NET installation.
 - Checksums and build provenance.
 
-Build output is unsigned. Review the security model before exposing a listener. A successful CI startup/loopback test is **not** two-PC LAN acceptance or a security audit.
+Build output is unsigned. Review the security model before exposing a listener. A successful CI startup/render/loopback test is **not** two-PC LAN acceptance or a security audit.
 
 ## Implemented
 
@@ -38,6 +38,7 @@ dotnet build RemoteDesk.sln -c Release
 dotnet run --project tests/RemoteDesk.Core.Tests -c Release
 dotnet run --project tests/RemoteDesk.Protocol.Tests -c Release
 dotnet run --project tests/RemoteDesk.Security.Tests -c Release
+dotnet run --project tests/RemoteDesk.Desktop.Tests -c Release -- artifacts/workspace.png
 powershell -ExecutionPolicy Bypass -File scripts/Build.ps1
 ```
 

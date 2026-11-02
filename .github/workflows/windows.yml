@@ -12,8 +12,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
       - name: Build solution
@@ -42,6 +42,13 @@ jobs:
           if ($p.MainWindowHandle -eq 0) { Stop-Process $p.Id; throw 'No WPF window created' }
           Write-Host "PASS: WPF window opened: $($p.MainWindowTitle)"
           Stop-Process $p.Id
+      - name: Render and verify actual WPF workspace
+        shell: pwsh
+        run: |
+          $output = dotnet run --project tests/RemoteDesk.Desktop.Tests -c Release --no-build -- artifacts/run/RemoteDesk-workspace.png 2>&1
+          $code = $LASTEXITCODE
+          $output | ForEach-Object { Write-Host "$_" }
+          if ($code -ne 0) { $output | ForEach-Object { Write-Host "::error::$_" }; exit $code }
       - name: Publish self-contained portable package
         shell: pwsh
         run: |
@@ -65,7 +72,7 @@ jobs:
           Source commit: ${{ github.sha }}
           Workflow: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           Runner: windows-latest, Windows x64, .NET 10 SDK.
-          Checks: Release solution build, Core/Protocol/Security integration suites, Windows CNG persistence and non-exportability, WPF window startup.
+          Checks: Release solution build, Core/Protocol/Security integration suites, Windows CNG persistence and non-exportability, WPF window startup and rendered workspace/default-off state checks.
           Manual two-PC LAN, DPI and resource acceptance: pending (see docs/Acceptance.md).
           Package is unsigned. No screen streaming or remote input in phase one.
           "@ | Set-Content run/BUILD-INFO.md

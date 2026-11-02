@@ -5,10 +5,10 @@ Automated tests passing is necessary but not sufficient. **Do not start phase tw
 ## Automated gates
 
 - Core: complete lifecycle, illegal transitions, disconnect/cancel from each intermediate state, default-deny capabilities.
-- Protocol: frame roundtrip, duplicate ID, sequence gap, mismatched session/version, invalid payload, negative/oversized/truncated/malformed frames, cancellation.
+- Protocol: frame roundtrip, duplicate ID, sequence gap, mismatched session/version, invalid payload, negative/oversized/truncated/malformed frames, cancellation, missing fields, duplicate JSON properties, numeric enums and session message cap.
 - Security/transport: distinct keys, pins and mismatches, certificate requirement, real two-way TLS, TLS/request identity binding, explicit approve/reject, heartbeat, orderly disconnect, cancellation during approval, Agent restart, transport loss.
 - Windows-only: stable CNG identity across reloads, private-key export fails.
-- WPF process stays alive and creates a real main window after publish.
+- WPF process stays alive and creates a real main window after publish; real workspace initializes identity, defaults disconnected/listener-off, and renders to a PNG.
 
 Console test exit code is the gate. No third-party test adapter is required. Exact build/test outcome and artifact run are in `run/BUILD-INFO.md` when generated.
 

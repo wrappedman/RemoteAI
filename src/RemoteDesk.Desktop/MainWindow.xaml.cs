@@ -26,7 +26,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _operation;
     private TaskCompletionSource<bool>? _approval;
     private readonly SessionStateMachine _machine = new();
-    private readonly ObservableCollection<string> _audit = [];
+    private readonly ObservableCollection<AuditEntry> _audit = [];
     private List<SavedDevice> _devices = [];
     private bool _busy, _incoming, _closing, _canClose, _changingListener;
     private readonly string _settingsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RemoteDesk", "devices.json");
@@ -44,7 +44,7 @@ public partial class MainWindow : Window
     }
     private void Log(string message) => Ui(() =>
     {
-        _audit.Insert(0, $"{DateTime.Now:HH:mm:ss}  {message}");
+        _audit.Insert(0, new AuditEntry(DateTimeOffset.Now, "Endpoint", message));
         while (_audit.Count > 100) _audit.RemoveAt(_audit.Count - 1);
     });
     private void SetState(SessionState state) => Ui(() =>
@@ -54,6 +54,7 @@ public partial class MainWindow : Window
         {
             if (_machine.State == state) return;
             _machine.MoveTo(state);
+            TopStatus.Text = state == SessionState.Connected ? "●  Encrypted LAN session active" : "●  " + state;
             StateText.Text = state switch { SessionState.WaitingForApproval => "Waiting for approval", _ => state.ToString() };
             ConnectButton.IsEnabled = false;
             DisconnectButton.Visibility = Visibility.Visible;
@@ -69,6 +70,8 @@ public partial class MainWindow : Window
         }
         _busy = false; _incoming = false;
         StateText.Text = "Disconnected";
+        PeerText.Text = "No active peer";
+        TopStatus.Text = _agent is null ? "●  Ready · listener off" : "●  Ready for attended requests";
         CipherText.Text = "Mutual TLS · pinned identity";
         ConnectButton.IsEnabled = _identity is not null && !_closing;
         DisconnectButton.Visibility = Visibility.Collapsed;
@@ -205,6 +208,7 @@ public partial class MainWindow : Window
     private void AttachSession(SecureSession session, bool owned)
     {
         _session = session;
+        PeerText.Text = $"Peer: {session.PeerName} · {session.PeerId}";
         CipherText.Text = session.Cipher;
         Log("Mutual TLS session established; desktop and input remain disabled.");
         _ = ObserveSessionAsync(session, owned);

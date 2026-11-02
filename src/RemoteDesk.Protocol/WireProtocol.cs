@@ -6,7 +6,13 @@ namespace RemoteDesk.Protocol;
 
 public enum MessageType { ConnectionRequest, Approval, Rejection, Ping, Pong, Disconnect }
 public sealed record Payload(string? DeviceId = null, string? DisplayName = null);
-public sealed record Envelope(int Version, Guid MessageId, Guid SessionId, long Sequence, MessageType Type, Payload Payload);
+public sealed record Envelope(
+    [property: JsonRequired] int Version,
+    [property: JsonRequired] Guid MessageId,
+    [property: JsonRequired] Guid SessionId,
+    [property: JsonRequired] long Sequence,
+    [property: JsonRequired] MessageType Type,
+    [property: JsonRequired] Payload Payload);
 
 public static class WireProtocol
 {

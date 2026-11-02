@@ -40,6 +40,19 @@ foreach (var text in new[] { "null", "{}", "not json", "{\"version\":1,\"unknown
     var bytes = Encoding.UTF8.GetBytes(text); var frame = new byte[4 + bytes.Length];
     BinaryPrimitives.WriteInt32BigEndian(frame, bytes.Length); bytes.CopyTo(frame, 4); await InvalidRead(frame);
 }
+// Missing type must not silently default to ConnectionRequest; duplicate JSON keys are forbidden.
+string valid = Encoding.UTF8.GetString(stream.ToArray().AsSpan(4));
+foreach (string invalid in new[] {
+    valid.Replace("\"type\":\"ConnectionRequest\",", ""),
+    valid.Replace("\"version\":1", "\"version\":1,\"version\":1"),
+    valid.Replace("\"ConnectionRequest\"", "0") })
+{
+    var bytes = Encoding.UTF8.GetBytes(invalid); var frame = new byte[4 + bytes.Length];
+    BinaryPrimitives.WriteInt32BigEndian(frame, bytes.Length); bytes.CopyTo(frame, 4); await InvalidRead(frame);
+}
+var bounded = new MessageGuard(id);
+for (int n = 1; n <= WireProtocol.MaxMessagesPerSession; n++) bounded.Accept(WireProtocol.Create(id, n, MessageType.Ping));
+Invalid(() => bounded.Accept(WireProtocol.Create(id, WireProtocol.MaxMessagesPerSession + 1, MessageType.Ping)));
 using var cancellation = new CancellationTokenSource(); cancellation.Cancel();
 try { await WireProtocol.ReadAsync(new MemoryStream(), cancellation.Token); throw new Exception("Cancellation ignored"); }
 catch (OperationCanceledException) { }

@@ -9,6 +9,8 @@ foreach ($name in @('Core', 'Protocol', 'Security')) {
 }
 dotnet publish src/RemoteDesk.Desktop -c Release -r win-x64 --self-contained false -o run
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+dotnet run --project tests/RemoteDesk.Desktop.Tests -c Release --no-build -- run/RemoteDesk-workspace.png
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if (-not $SkipPortable) {
     dotnet publish src/RemoteDesk.Desktop -c Release -r win-x64 --self-contained true -o artifacts/portable -p:DebugType=None -p:DebugSymbols=false
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
