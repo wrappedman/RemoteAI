@@ -239,7 +239,8 @@ internal static class Program
         }
         var settingsTab = (TabItem)window.FindName("SettingsTab"); settingsTab.Visibility = Visibility.Visible;
         ((TabControl)window.FindName("Workspace")).SelectedItem = settingsTab;
-        ((FrameworkElement)page.FindName("PasswordState")).BringIntoView(); await Task.Delay(150);
+        page.ShowPasswordSection(); await Task.Delay(200);
+        if (((ScrollViewer)page.FindName("SettingsScroller")).VerticalOffset == 0) throw new Exception("Password setup shortcut did not reveal the password section.");
         Screenshot(window, Path.Combine(screenshots, "RemoteDesk-password.png"));
         // A missing shared folder must not reset the password when the app reloads settings.
         string removable = Path.Combine(Path.GetTempPath(), "RemoteDesk-offline-" + Guid.NewGuid().ToString("N"));

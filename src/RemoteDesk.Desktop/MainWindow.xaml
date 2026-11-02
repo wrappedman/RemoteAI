@@ -30,6 +30,7 @@
       <Border Grid.Column="2" Style="{StaticResource Card}" Padding="20"><StackPanel><TextBlock Text="Incoming access" FontSize="17" FontWeight="SemiBold"/><TextBlock x:Name="MachineNameText" FontSize="14" Margin="0,17,0,10"/><CheckBox x:Name="ListenCheck" Content="Available on this private LAN" Checked="Listen_Changed" Unchecked="Listen_Changed"/>
        <TextBlock Text="Grant permissions per Controller. Automatic password approval is off unless explicitly enabled for trusted keys." TextWrapping="Wrap" Foreground="#8EA2BD" FontSize="12" LineHeight="19" Margin="0,16,0,16"/>
        <TextBlock x:Name="SessionCountText" Text="No active sessions" Foreground="#72D5B0" FontSize="13"/><Button Content="Connection policies &amp; shared folder" Click="Settings_Click" Margin="0,18,0,0"/>
+       <Button Content="Password / automatic approval" Click="PasswordSettings_Click" Margin="0,8,0,0"/>
        <Expander Header="Full local fingerprint" Foreground="#A2B6D0" Margin="0,15,0,0"><TextBox x:Name="FullFingerprintBox" IsReadOnly="True" Height="65" TextWrapping="Wrap" FontFamily="Consolas" FontSize="11" Margin="0,8,0,0"/></Expander>
        <TextBlock Text="LAN only · no Internet relay configured.&#x0a;Windows UAC / Secure Desktop restrictions apply." Foreground="#71859F" FontSize="11" LineHeight="18" TextWrapping="Wrap" Margin="0,18,0,0"/>
       </StackPanel></Border>

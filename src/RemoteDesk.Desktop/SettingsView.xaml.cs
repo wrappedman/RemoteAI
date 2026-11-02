@@ -47,6 +47,8 @@ public partial class SettingsView : UserControl
             : length < 16 ? $"Not saved: {length} characters entered; at least 16 required."
             : "New password entered; use Save settings to apply it. It is cleared only after a successful save.";
     }
+    public void ShowPasswordSection() => _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded,
+        new Action(() => { UpdateLayout(); SettingsScroller.ScrollToEnd(); }));
     private void Folder_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFolderDialog { Title = "Choose the only folder approved peers may access" };

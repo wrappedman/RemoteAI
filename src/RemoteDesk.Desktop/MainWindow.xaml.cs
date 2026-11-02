@@ -353,6 +353,7 @@ public partial class MainWindow : Window
     private void Workspace_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (Workspace.SelectedItem is TabItem { Content: not SessionView }) SetFullScreen(false); }
     private void Home_Click(object sender, RoutedEventArgs e) { Workspace.SelectedItem = ConnectionCenterTab; TargetIdBox.Focus(); }
     private void Settings_Click(object sender, RoutedEventArgs e) { SettingsPage.Load(_settings); SettingsTab.Visibility = Visibility.Visible; Workspace.SelectedItem = SettingsTab; }
+    private void PasswordSettings_Click(object sender, RoutedEventArgs e) { Settings_Click(sender, e); SettingsPage.ShowPasswordSection(); }
     private void Copy_Click(object sender, RoutedEventArgs e)
     {
         try { if (_identity is not null) Clipboard.SetText(NumericDeviceId.FromFingerprint(_identity.DeviceId)); }
